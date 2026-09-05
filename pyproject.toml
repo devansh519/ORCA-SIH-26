@@ -15,6 +15,7 @@ dependencies = [
   "asyncpg>=0.29.0",
   "alembic>=1.13.0",
   "httpx>=0.27.0",
+  "python-dotenv>=1.0.0",
   "langgraph>=0.2.0",
   "langchain>=0.3.0",
   "pytest>=8.0.0",
@@ -23,8 +24,8 @@ dependencies = [
 ]
 
 [tool.pytest.ini_options]
-pythonpath = ["."]
-testpaths = ["tests"]
+pythonpath = ["backend"]
+testpaths = ["backend/tests"]
 
 [tool.uv]
 package = false
