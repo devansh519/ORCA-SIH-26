@@ -21,7 +21,7 @@ The current prototype demonstrates a working Rameswaram scenario using **live we
 | Live weather | Open-Meteo |
 | Live marine | Open-Meteo Marine API |
 | Geospatial data | Marine Regions World EEZ v12 |
-| LLM | Groq · `llama-3.3-70b-versatile` |
+| LLM | Groq · `openai/gpt-oss-120b` |
 | Frontend | Static HTML dashboard |
 | Alert system | Background geofence poller |
 
