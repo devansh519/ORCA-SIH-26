@@ -135,11 +135,7 @@ function resolveApiBase() {
 
 const API_BASE = resolveApiBase();
 const USER_ID = "demo-fisherman";
-const LOCATION = {
-  name: "Rameswaram",
-  latitude: 9.2876,
-  longitude: 79.3129
-};
+const DEFAULT_LOCATION_NAME = "Rameswaram";
 
 async function apiFetch(path, options = {}) {
   const res = await fetch(`${API_BASE}${path}`, {
@@ -230,6 +226,15 @@ function getOrchestration(result) {
 function getSelectedTools(result) {
   const orchestration = getOrchestration(result);
   return orchestration.selected_tools || result?.selected_tools || [];
+}
+
+function getResultLocation(result, fallbackName = DEFAULT_LOCATION_NAME) {
+  const location = result?.location || {};
+  return {
+    name: location.name || fallbackName,
+    latitude: location.latitude,
+    longitude: location.longitude
+  };
 }
 
 // ============================================================================
@@ -428,7 +433,7 @@ function Sidebar({
 // HEADER
 // ============================================================================
 
-function Header({ health, alertCount, onAlerts }) {
+function Header({ health, alertCount, onAlerts, locationName, setLocationName }) {
   const [now, setNow] = useState(new Date());
 
   useEffect(() => {
@@ -453,10 +458,7 @@ function Header({ health, alertCount, onAlerts }) {
     <header className="h-16 bg-white border-b border-slate-200 px-6 flex items-center justify-between z-20 flex-shrink-0">
       <div>
         <h1 className="font-display font-bold text-slate-900 leading-none text-lg">ORCA</h1>
-        <p className="text-[11px] text-slate-500 flex items-center gap-1">
-          <i className="fa-solid fa-location-dot text-slate-400"></i>
-          Rameswaram, Tamil Nadu
-        </p>
+        
       </div>
 
       <div className="flex items-center gap-5">
@@ -581,7 +583,8 @@ function ChatPanel({
   onSend,
   loading,
   inputRef,
-  onClear
+  onClear,
+  locationName
 }) {
   const [text, setText] = useState("");
   const scrollRef = useRef(null);
@@ -714,7 +717,7 @@ function ChatPanel({
 
         <p className="text-[10px] text-slate-400 mt-2 flex items-center gap-1.5">
           <i className="fa-solid fa-location-dot"></i>
-          Using demo location: {LOCATION.name} · {LOCATION.latitude}, {LOCATION.longitude}
+          Using location: {locationName}
         </p>
       </div>
     </div>
@@ -966,7 +969,12 @@ function GeofenceCard({ result }) {
         </div>
 
         <span className="absolute bottom-1.5 left-2 text-[10px] text-slate-500 font-mono">
-          {LOCATION.name} · {LOCATION.latitude.toFixed(4)}°N, {LOCATION.longitude.toFixed(4)}°E
+          {(() => {
+            const loc = getResultLocation(result);
+            return loc.latitude != null && loc.longitude != null
+              ? `${loc.name} · ${Number(loc.latitude).toFixed(4)}°N, ${Number(loc.longitude).toFixed(4)}°E`
+              : loc.name;
+          })()}
         </span>
       </div>
 
@@ -1043,15 +1051,21 @@ function SourcesCard({ sources }) {
 
 function AdditionalInfoCard({ result }) {
   const tools = getSelectedTools(result);
+  const location = getResultLocation(result);
+
+  const coordinateValue =
+    location.latitude != null && location.longitude != null
+      ? `${Number(location.latitude).toFixed(4)}° N, ${Number(location.longitude).toFixed(4)}° E`
+      : NA;
 
   const rows = [
     { icon: "fa-clock", label: "Updated", value: fmtDateTime(result?.timestamp_utc) },
     { icon: "fa-chart-simple", label: "Confidence", value: fmtPercent(result?.confidence) },
-    { icon: "fa-location-dot", label: "Location", value: LOCATION.name },
+    { icon: "fa-location-dot", label: "Location", value: location.name },
     {
       icon: "fa-compass",
       label: "Coordinates",
-      value: `${LOCATION.latitude}° N, ${LOCATION.longitude}° E`
+      value: coordinateValue
     },
     {
       icon: "fa-wrench",
@@ -1574,7 +1588,8 @@ function DashboardView({
   inputRef,
   onSend,
   onClear,
-  log
+  log,
+  locationName
 }) {
   return (
     <div className="space-y-5">
@@ -1884,6 +1899,7 @@ function OrcaDashboard() {
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [activeView, setActiveView] = useState("dashboard");
   const [language, setLanguage] = useState("en");
+  const [locationName, setLocationName] = useState(DEFAULT_LOCATION_NAME);
 
   const [health, setHealth] = useState({ status: "checking" });
 
@@ -2014,7 +2030,8 @@ function OrcaDashboard() {
     setLog([]);
 
     pushLog(`Request sent to ORCA backend: "${cleanQuestion}"`);
-    pushLog(`Location: ${LOCATION.name} (${LOCATION.latitude}, ${LOCATION.longitude})`);
+    const selectedLocation = locationName.trim();
+    pushLog(`Location: ${selectedLocation || "not specified"}`);
     pushLog(`Language: ${language}`);
 
     try {
@@ -2026,7 +2043,9 @@ function OrcaDashboard() {
           user_id: USER_ID,
           language,
           voice_input: false,
-          location: LOCATION,
+          location: {
+            name: selectedLocation
+          },
           question: backendQuestion
         })
       });

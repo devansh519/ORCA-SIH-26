@@ -9,9 +9,10 @@ import httpx
 from app.tools.base import BaseTool, ToolResult
 
 
-class WeatherProvider(Protocol):
-    """Provider interface for weather observations and alerts."""
+OPEN_METEO_WEATHER_URL = "https://api.open-meteo.com/v1/forecast"
 
+
+class WeatherProvider(Protocol):
     async def fetch(
         self,
         *,
@@ -24,11 +25,7 @@ class WeatherProvider(Protocol):
 
 
 class UnavailableWeatherProvider:
-    """Safe fallback when no live weather source is configured.
-
-    No wind, rainfall, cyclone, lightning, wave, or hazard values are
-    fabricated by this provider.
-    """
+    """Safe fallback when no live weather source is configured."""
 
     async def fetch(
         self,
@@ -39,19 +36,14 @@ class UnavailableWeatherProvider:
         request_id: str | None = None,
     ) -> dict[str, Any]:
         return {
-            "source": "IMD/SACHET",
+            "source": "Open-Meteo",
             "status": "unavailable",
             "timestamp": target_time.isoformat(),
             "fetch_timestamp": datetime.now(timezone.utc).isoformat(),
-            "location": {
-                "lat": latitude,
-                "lon": longitude,
-            },
+            "location": {"lat": latitude, "lon": longitude},
             "variables": {},
             "units": {},
-            "quality": {
-                "level": "UNAVAILABLE",
-            },
+            "quality": {"level": "UNAVAILABLE"},
             "confidence": 0.0,
             "reason": "no_live_weather_source_configured",
             "freshness": "UNKNOWN",
@@ -59,29 +51,48 @@ class UnavailableWeatherProvider:
         }
 
 
-class HttpWeatherProvider:
-    """Generic HTTP weather-provider adapter.
+class OpenMeteoWeatherProvider:
+    """Open-Meteo forecast adapter.
 
-    Configure a real upstream endpoint with WEATHER_API_URL.
-
-    Optional:
-        WEATHER_API_URL
-        WEATHER_API_KEY
-
-    The response should be a JSON object. The adapter preserves the upstream
-    source, variables, units, quality, confidence, and alerts when supplied.
+    Open-Meteo's public forecast API does not require an API key for the
+    standard non-commercial endpoint. It returns JSON weather forecasts.
     """
 
     def __init__(
         self,
         *,
-        url: str,
-        api_key: str | None = None,
-        timeout: float = 10.0,
+        url: str = OPEN_METEO_WEATHER_URL,
+        timeout: float = 15.0,
     ) -> None:
         self.url = url
-        self.api_key = api_key
         self.timeout = timeout
+
+    @staticmethod
+    def _nearest_index(times: list[str], target_time: datetime) -> int:
+        if not times:
+            raise ValueError("open_meteo_weather_no_times")
+
+        target = target_time.astimezone(timezone.utc).replace(
+            minute=0,
+            second=0,
+            microsecond=0,
+        )
+
+        parsed = [
+            datetime.fromisoformat(value.replace("Z", "+00:00")).astimezone(
+                timezone.utc
+            )
+            for value in times
+        ]
+
+        return min(
+            range(len(parsed)),
+            key=lambda index: abs((parsed[index] - target).total_seconds()),
+        )
+
+    @staticmethod
+    def _value(values: list[Any], index: int) -> Any:
+        return values[index] if index < len(values) else None
 
     async def fetch(
         self,
@@ -91,85 +102,115 @@ class HttpWeatherProvider:
         target_time: datetime,
         request_id: str | None = None,
     ) -> dict[str, Any]:
-        headers: dict[str, str] = {}
-
-        if self.api_key:
-            headers["Authorization"] = f"Bearer {self.api_key}"
-
         params = {
             "latitude": latitude,
             "longitude": longitude,
-            "timestamp": target_time.isoformat(),
+            "hourly": ",".join(
+                [
+                    "temperature_2m",
+                    "wind_speed_10m",
+                    "wind_direction_10m",
+                    "wind_gusts_10m",
+                    "precipitation",
+                    "rain",
+                    "weather_code",
+                    "cloud_cover",
+                    "pressure_msl",
+                ]
+            ),
+            "forecast_days": 3,
+            "timezone": "UTC",
+            "wind_speed_unit": "ms",
+            "temperature_unit": "celsius",
+            "precipitation_unit": "mm",
         }
 
         try:
             async with httpx.AsyncClient(timeout=self.timeout) as client:
-                response = await client.get(
-                    self.url,
-                    params=params,
-                    headers=headers,
-                )
+                response = await client.get(self.url, params=params)
                 response.raise_for_status()
                 payload = response.json()
 
-            if not isinstance(payload, dict):
-                raise ValueError("weather_provider_response_must_be_object")
+            hourly = payload.get("hourly")
+            if not isinstance(hourly, dict):
+                raise ValueError("open_meteo_weather_hourly_missing")
 
-            variables = payload.get("variables", payload)
+            times = hourly.get("time")
+            if not isinstance(times, list):
+                raise ValueError("open_meteo_weather_times_missing")
 
-            if not isinstance(variables, dict):
-                raise ValueError("weather_variables_must_be_object")
+            index = self._nearest_index(times, target_time)
+            selected_time = str(times[index])
 
-            alerts = payload.get("alerts", [])
-            if not isinstance(alerts, list):
-                raise ValueError("weather_alerts_must_be_list")
+            variables = {
+                "temperature_c": self._value(
+                    hourly.get("temperature_2m", []), index
+                ),
+                "wind_speed_ms": self._value(
+                    hourly.get("wind_speed_10m", []), index
+                ),
+                "wind_direction_deg": self._value(
+                    hourly.get("wind_direction_10m", []), index
+                ),
+                "wind_gusts_ms": self._value(
+                    hourly.get("wind_gusts_10m", []), index
+                ),
+                "precipitation_mm": self._value(
+                    hourly.get("precipitation", []), index
+                ),
+                "rain_mm": self._value(hourly.get("rain", []), index),
+                "weather_code": self._value(
+                    hourly.get("weather_code", []), index
+                ),
+                "cloud_cover_pct": self._value(
+                    hourly.get("cloud_cover", []), index
+                ),
+                "pressure_msl_hpa": self._value(
+                    hourly.get("pressure_msl", []), index
+                ),
+            }
+
+            variables = {
+                key: value
+                for key, value in variables.items()
+                if value is not None
+            }
 
             return {
-                "source": payload.get("source", self.url),
+                "source": "Open-Meteo Weather API",
                 "status": "available",
-                "timestamp": payload.get(
-                    "timestamp",
-                    target_time.isoformat(),
-                ),
+                "timestamp": selected_time,
                 "fetch_timestamp": datetime.now(timezone.utc).isoformat(),
-                "location": payload.get(
-                    "location",
-                    {
-                        "lat": latitude,
-                        "lon": longitude,
-                    },
-                ),
+                "location": {"lat": latitude, "lon": longitude},
                 "variables": variables,
-                "units": payload.get("units", {}),
-                "quality": payload.get(
-                    "quality",
-                    {
-                        "level": "UPSTREAM",
-                    },
-                ),
-                "confidence": float(
-                    payload.get("confidence", 0.8)
-                ),
-                "reason": payload.get("reason"),
-                "freshness": payload.get("freshness", "UNKNOWN"),
-                "alerts": alerts,
+                "units": {
+                    "temperature_c": "°C",
+                    "wind_speed_ms": "m/s",
+                    "wind_direction_deg": "°",
+                    "wind_gusts_ms": "m/s",
+                    "precipitation_mm": "mm",
+                    "rain_mm": "mm",
+                    "weather_code": "WMO code",
+                    "cloud_cover_pct": "%",
+                    "pressure_msl_hpa": "hPa",
+                },
+                "quality": {"level": "GOOD"},
+                "confidence": 0.85,
+                "reason": "open_meteo_forecast",
+                "freshness": "FORECAST",
+                "alerts": [],
             }
 
         except Exception as exc:
             return {
-                "source": self.url,
+                "source": "Open-Meteo Weather API",
                 "status": "unavailable",
                 "timestamp": target_time.isoformat(),
                 "fetch_timestamp": datetime.now(timezone.utc).isoformat(),
-                "location": {
-                    "lat": latitude,
-                    "lon": longitude,
-                },
+                "location": {"lat": latitude, "lon": longitude},
                 "variables": {},
                 "units": {},
-                "quality": {
-                    "level": "UNAVAILABLE",
-                },
+                "quality": {"level": "UNAVAILABLE"},
                 "confidence": 0.0,
                 "reason": "weather_provider_request_failed",
                 "detail": str(exc),
@@ -179,19 +220,7 @@ class HttpWeatherProvider:
 
 
 class WeatherTool(BaseTool):
-    """ORCA weather and hazard-data tool.
-
-    Provider selection:
-
-        WEATHER_PROVIDER=unavailable
-            Safe default. No fabricated weather/hazard values.
-
-        WEATHER_PROVIDER=http
-            Uses WEATHER_API_URL through HttpWeatherProvider.
-
-    This keeps the tool ready for a real IMD/SACHET integration without
-    falsely claiming that an arbitrary endpoint is an official IMD source.
-    """
+    """ORCA weather tool with Open-Meteo as the Tier-1 live provider."""
 
     def __init__(
         self,
@@ -207,15 +236,12 @@ class WeatherTool(BaseTool):
             "unavailable",
         ).strip().lower()
 
-        if provider_name == "http":
-            url = os.getenv("WEATHER_API_URL")
-
-            if not url:
-                return UnavailableWeatherProvider()
-
-            return HttpWeatherProvider(
-                url=url,
-                api_key=os.getenv("WEATHER_API_KEY"),
+        if provider_name == "open_meteo":
+            return OpenMeteoWeatherProvider(
+                url=os.getenv(
+                    "OPEN_METEO_WEATHER_URL",
+                    OPEN_METEO_WEATHER_URL,
+                )
             )
 
         return UnavailableWeatherProvider()
@@ -240,32 +266,23 @@ class WeatherTool(BaseTool):
         target_time: datetime,
         request_id: str | None = None,
     ) -> dict[str, Any]:
-        """Fetch weather/hazard information through the configured provider."""
         started = self.now_utc()
         result_data: dict[str, Any] | None = None
 
         if not self.validate_coordinates(latitude, longitude):
-            result = ToolResult(
+            return ToolResult(
                 source="weather",
                 status="unavailable",
                 timestamp=target_time,
                 fetch_timestamp=self.now_utc(),
-                location={
-                    "lat": latitude,
-                    "lon": longitude,
-                },
+                location={"lat": latitude, "lon": longitude},
                 variables={},
                 units={},
-                quality={
-                    "level": "UNAVAILABLE",
-                },
+                quality={"level": "UNAVAILABLE"},
                 confidence=0.0,
                 reason="invalid_coordinates",
                 freshness="UNKNOWN",
             ).to_dict()
-
-            result["alerts"] = []
-            return result
 
         try:
             result_data = await self.provider.fetch(
@@ -276,35 +293,22 @@ class WeatherTool(BaseTool):
             )
 
             if not isinstance(result_data, dict):
-                raise ValueError(
-                    "weather_provider_result_must_be_object"
-                )
+                raise ValueError("weather_provider_result_must_be_object")
 
             result_data.setdefault("source", "weather")
             result_data.setdefault("status", "unavailable")
-            result_data.setdefault(
-                "timestamp",
-                target_time.isoformat(),
-            )
+            result_data.setdefault("timestamp", target_time.isoformat())
             result_data.setdefault(
                 "fetch_timestamp",
                 self.now_utc().isoformat(),
             )
             result_data.setdefault(
                 "location",
-                {
-                    "lat": latitude,
-                    "lon": longitude,
-                },
+                {"lat": latitude, "lon": longitude},
             )
             result_data.setdefault("variables", {})
             result_data.setdefault("units", {})
-            result_data.setdefault(
-                "quality",
-                {
-                    "level": "UNKNOWN",
-                },
-            )
+            result_data.setdefault("quality", {"level": "UNKNOWN"})
             result_data.setdefault("confidence", 0.0)
             result_data.setdefault("freshness", "UNKNOWN")
             result_data.setdefault("alerts", [])
@@ -320,20 +324,14 @@ class WeatherTool(BaseTool):
                 status="unavailable",
                 timestamp=target_time,
                 fetch_timestamp=self.now_utc(),
-                location={
-                    "lat": latitude,
-                    "lon": longitude,
-                },
+                location={"lat": latitude, "lon": longitude},
                 variables={},
                 units={},
-                quality={
-                    "level": "UNAVAILABLE",
-                },
+                quality={"level": "UNAVAILABLE"},
                 confidence=0.0,
                 reason="weather_tool_execution_failed",
                 freshness="UNKNOWN",
             ).to_dict()
-
             result_data["alerts"] = []
             result_data["detail"] = str(exc)
             return result_data
@@ -342,7 +340,6 @@ class WeatherTool(BaseTool):
             duration_ms = int(
                 (self.now_utc() - started).total_seconds() * 1000
             )
-
             self.log_call(
                 request_id=request_id,
                 latitude=latitude,
@@ -364,9 +361,7 @@ class WeatherTool(BaseTool):
         target_time: datetime | None = None,
         request_id: str | None = None,
     ) -> dict[str, Any]:
-        """Convenience method for agents and graph nodes."""
         target_time = target_time or datetime.now(timezone.utc)
-
         return await self.fetch(
             latitude=latitude,
             longitude=longitude,
@@ -382,14 +377,12 @@ class WeatherTool(BaseTool):
         target_time: datetime | None = None,
         request_id: str | None = None,
     ) -> dict[str, Any]:
-        """Return the weather result with its structured alert list."""
         result = await self.get_conditions(
             latitude=latitude,
             longitude=longitude,
             target_time=target_time,
             request_id=request_id,
         )
-
         return {
             "status": result.get("status", "unavailable"),
             "source": result.get("source", "weather"),
@@ -409,7 +402,6 @@ class WeatherTool(BaseTool):
         target_time: datetime | None = None,
         request_id: str | None = None,
     ) -> dict[str, Any]:
-        """Standard ORCA tool execution entry point."""
         return await self.get_conditions(
             latitude=latitude,
             longitude=longitude,
