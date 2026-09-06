@@ -116,6 +116,83 @@ def _is_boundary_query(text: str) -> bool:
     return any(term in value for term in terms)
 
 
+def _detect_geospatial_operation(text: str, route: list[Any] | None = None) -> str:
+    """
+    Decide what the user is actually asking the geospatial tool to do.
+
+    Supported real operations:
+      - point_containment: inside/outside EEZ
+      - point_distance: distance to nearest EEZ boundary
+      - route_intersection: route/EEZ intersection
+      - unsupported_coastline: coastline/land-distance requests are not
+        answered from the EEZ dataset.
+      - point_analysis: generic geospatial request
+    """
+    value = (text or "").strip().lower()
+
+    if route and len(route) >= 2:
+        return "route_intersection"
+
+    distance_terms = (
+        "how far",
+        "distance",
+        "km from",
+        "kilometre",
+        "kilometer",
+        "away from",
+        "how close",
+        "close to",
+        "near the boundary",
+        "near boundary",
+    )
+    coastline_terms = (
+        "coastal land",
+        "coastline",
+        "coast line",
+        "shore",
+        "shoreline",
+        "land from",
+        "land distance",
+        "distance from land",
+    )
+    route_terms = (
+        "route",
+        "path",
+        "trip line",
+        "does my route",
+        "will my route",
+        "cross the boundary",
+        "cross eeZ",
+    )
+    containment_terms = (
+        "am i inside",
+        "inside the eez",
+        "inside eez",
+        "within the eez",
+        "within eez",
+        "in the eez",
+        "outside the eez",
+        "outside eez",
+        "inside the maritime boundary",
+        "inside the boundary",
+        "within the maritime boundary",
+    )
+
+    if any(term in value for term in coastline_terms):
+        return "unsupported_coastline"
+
+    if any(term in value for term in route_terms):
+        return "route_intersection"
+
+    if any(term in value for term in distance_terms):
+        return "point_distance"
+
+    if any(term in value for term in containment_terms):
+        return "point_containment"
+
+    return "point_analysis"
+
+
 def _select_tools(query_type: str) -> list[str]:
     """
     Deterministic tool selection.
@@ -259,21 +336,44 @@ async def _run_geospatial(
     tool: GeospatialTool,
 ) -> dict[str, Any]:
     """
-    Use the existing, proven GeospatialTool API.
+    Execute the geospatial operation requested by the user's question.
 
-    IMPORTANT:
-    Do not call GeospatialTool.fetch().
-    The current implementation exposes:
-        is_inside_eez()
-        check_route()
+    The existing live GeospatialTool remains the source of truth:
+      is_inside_eez(...) -> real PostGIS point result
+      check_route(...)   -> real PostGIS route result
+
+    We only choose which operation to call and normalize the response.
+    No geospatial values are fabricated.
     """
-
     latitude = state.get("latitude")
     longitude = state.get("longitude")
+    route = state.get("route") or []
+    question = state.get("text", "")
+
+    operation = _detect_geospatial_operation(question, route)
+
+    if operation == "unsupported_coastline":
+        return {
+            "status": "unavailable",
+            "operation": operation,
+            "question": question,
+            "source": "Marine Regions World EEZ v12",
+            "reason": (
+                "coastline_geometry_not_configured: the current live "
+                "geospatial dataset supports EEZ boundary analysis, not "
+                "distance to Indian coastal land."
+            ),
+            "inside": None,
+            "distance_km": None,
+            "confidence": 0.0,
+            "quality": "UNAVAILABLE",
+        }
 
     if latitude is None or longitude is None:
         return {
             "status": "unavailable",
+            "operation": operation,
+            "question": question,
             "source": "Marine Regions World EEZ v12",
             "reason": "coordinates_missing",
             "inside": None,
@@ -282,15 +382,34 @@ async def _run_geospatial(
             "quality": "UNAVAILABLE",
         }
 
-    route = state.get("route") or []
+    if operation == "route_intersection":
+        if len(route) < 2:
+            return {
+                "status": "unavailable",
+                "operation": operation,
+                "question": question,
+                "source": "Marine Regions World EEZ v12",
+                "reason": "route_coordinates_missing",
+                "inside": None,
+                "distance_km": None,
+                "confidence": 0.0,
+                "quality": "UNAVAILABLE",
+            }
 
-    if len(route) >= 2:
-        return await tool.check_route(route)
+        result = await tool.check_route(route)
+        result = dict(result)
+        result["operation"] = "route_intersection"
+        result["question"] = question
+        return result
 
-    return await tool.is_inside_eez(
+    result = await tool.is_inside_eez(
         latitude=latitude,
         longitude=longitude,
     )
+    result = dict(result)
+    result["operation"] = operation
+    result["question"] = question
+    return result
 
 
 # ============================================================================
@@ -442,141 +561,116 @@ async def decide_node(
     state: ORCAState,
 ) -> ORCAState:
     """
-    Deterministic decision layer.
+    Turn the real geospatial result into an operation-specific answer.
 
-    Boundary queries can produce a geospatial recommendation because the
-    recommendation is directly supported by the real PostGIS result.
-
-    Fishing safety/yield scores remain separate and null until their required
-    live weather/marine inputs are available.
+    Safety/yield scores remain null because this demo path is geospatial-only.
     """
-
     state["safety_score"] = None
     state["yield_score"] = None
 
-    geo = state.get(
-        "geospatial_result"
-    ) or {}
-
-    query_type = state.get(
-        "query_type"
+    geo = state.get("geospatial_result") or {}
+    query_type = state.get("query_type")
+    operation = geo.get("operation") or _detect_geospatial_operation(
+        state.get("text", ""),
+        state.get("route") or [],
     )
 
-    # ------------------------------------------------------------------------
-    # Boundary-specific result.
-    # ------------------------------------------------------------------------
-
-    if query_type == BOUNDARY_QUERY:
-        if geo.get("status") == "available":
-
-            if geo.get("intersects_eez") is True:
-                state["recommendation"] = (
-                    "BOUNDARY_CROSSING"
-                )
-                state["recommendation_text"] = (
-                    "The supplied route intersects the EEZ boundary."
-                )
-
-            elif geo.get("inside") is True:
-                state["recommendation"] = "INSIDE_EEZ"
-
-                distance = geo.get("distance_km")
-
-                if distance is not None:
-                    state["recommendation_text"] = (
-                        "The supplied location is inside the EEZ and "
-                        f"{float(distance):.2f} km from the nearest "
-                        "EEZ boundary."
-                    )
-                else:
-                    state["recommendation_text"] = (
-                        "The supplied location is inside the EEZ."
-                    )
-
-            elif geo.get("inside") is False:
-                state["recommendation"] = "OUTSIDE_EEZ"
-
-                distance = geo.get("distance_km")
-
-                if distance is not None:
-                    state["recommendation_text"] = (
-                        "The supplied location is outside the EEZ and "
-                        f"{float(distance):.2f} km from the nearest "
-                        "EEZ boundary."
-                    )
-                else:
-                    state["recommendation_text"] = (
-                        "The supplied location is outside the EEZ."
-                    )
-
-            else:
-                state["recommendation"] = (
-                    "DATA_AVAILABLE"
-                )
-                state["recommendation_text"] = (
-                    "The geospatial tool returned a valid EEZ result."
-                )
-
-        else:
-            state["recommendation"] = (
-                "DATA_UNAVAILABLE"
-            )
-            state["recommendation_text"] = (
-                "A reliable geospatial boundary result is not "
-                "available for the supplied location."
-            )
-
+    if geo.get("status") != "available":
+        state["recommendation"] = "DATA_UNAVAILABLE"
+        state["recommendation_text"] = (
+            geo.get("reason")
+            if operation == "unsupported_coastline"
+            else "A reliable geospatial result is not available for this request."
+        )
         state["execution_status"] = "decided"
         return state
 
-    # ------------------------------------------------------------------------
-    # Existing fisherman / other intent behavior.
-    # ------------------------------------------------------------------------
-
-    if geo.get("status") == "available":
-        if geo.get("intersects_eez") is True:
-            state["safety_score_reasoning"] = (
-                "The supplied route intersects the EEZ geometry."
-            )
-        elif geo.get("inside") is True:
-            state["safety_score_reasoning"] = (
-                "The supplied fishing point is inside the EEZ geometry."
+    if operation == "point_distance":
+        distance = geo.get("distance_km")
+        if distance is None:
+            state["recommendation"] = "DISTANCE_UNAVAILABLE"
+            state["recommendation_text"] = (
+                "The nearest EEZ-boundary distance is unavailable."
             )
         else:
-            distance = geo.get("distance_km")
+            state["recommendation"] = "EEZ_BOUNDARY_DISTANCE"
+            state["recommendation_text"] = (
+                f"The supplied location is approximately {float(distance):.2f} km "
+                "from the nearest EEZ boundary."
+            )
 
-            if distance is not None:
-                state["safety_score_reasoning"] = (
-                    "The fishing point is outside the EEZ geometry and "
-                    f"{float(distance):.3f} km from the nearest EEZ boundary."
-                )
-            else:
-                state["safety_score_reasoning"] = (
-                    "The fishing point is outside the EEZ geometry."
-                )
+    elif operation == "point_containment":
+        inside = geo.get("inside")
+        if inside is True:
+            state["recommendation"] = "INSIDE_EEZ"
+            state["recommendation_text"] = (
+                "Yes. The supplied location is inside an EEZ polygon."
+            )
+        elif inside is False:
+            state["recommendation"] = "OUTSIDE_EEZ"
+            state["recommendation_text"] = (
+                "No. The supplied location is outside the EEZ polygons "
+                "in the dataset."
+            )
+        else:
+            state["recommendation"] = "CONTAINMENT_UNAVAILABLE"
+            state["recommendation_text"] = (
+                "The EEZ containment result is unavailable."
+            )
 
-    state["yield_reasoning"] = (
-        "A fishing-yield score is not produced until live marine "
-        "observations are available."
-    )
-
-    if (
-        state.get("weather_result", {}).get("status")
-        != "available"
-    ):
-        state["safety_score_reasoning"] = (
-            state.get("safety_score_reasoning")
-            or "A complete safety score requires live weather/hazard data."
+    elif operation == "route_intersection":
+        intersects = geo.get("intersects_eez")
+        distance = (
+            geo.get("minimum_distance_km")
+            if geo.get("minimum_distance_km") is not None
+            else geo.get("distance_km")
         )
 
-    state["recommendation"] = "INSUFFICIENT_DATA"
-    state["recommendation_text"] = (
-        "Live weather and marine data are required before ORCA can "
-        "make a fishing safety recommendation."
-    )
+        if intersects is True:
+            state["recommendation"] = "BOUNDARY_CROSSING"
+            state["recommendation_text"] = (
+                "The supplied route intersects an EEZ boundary."
+            )
+        elif intersects is False:
+            state["recommendation"] = "ROUTE_CLEAR"
+            if distance is not None:
+                state["recommendation_text"] = (
+                    "The supplied route does not intersect an EEZ boundary. "
+                    f"Its minimum distance to the EEZ geometry is "
+                    f"approximately {float(distance):.2f} km."
+                )
+            else:
+                state["recommendation_text"] = (
+                    "The supplied route does not intersect an EEZ boundary."
+                )
+        else:
+            state["recommendation"] = "ROUTE_CHECK_UNAVAILABLE"
+            state["recommendation_text"] = (
+                "The route could not be compared with the EEZ geometry."
+            )
+
+    else:
+        inside = geo.get("inside")
+        distance = geo.get("distance_km")
+
+        if inside is True:
+            state["recommendation"] = "INSIDE_EEZ"
+            state["recommendation_text"] = "The supplied location is inside an EEZ."
+        elif inside is False:
+            state["recommendation"] = "OUTSIDE_EEZ"
+            state["recommendation_text"] = "The supplied location is outside the EEZ."
+            if distance is not None:
+                state["recommendation_text"] += (
+                    f" It is approximately {float(distance):.2f} km "
+                    "from the nearest EEZ boundary."
+                )
+        else:
+            state["recommendation"] = "DATA_AVAILABLE"
+            state["recommendation_text"] = (
+                "The geospatial tool returned a valid EEZ result."
+            )
 
     state["execution_status"] = "decided"
-
     return state
 
 
@@ -638,6 +732,8 @@ def build_response(
             [],
         ),
         "geospatial": geo,
+        "geospatial_operation": geo.get("operation"),
+        "question": state.get("text", ""),
         "weather": state.get(
             "weather_result"
         ),

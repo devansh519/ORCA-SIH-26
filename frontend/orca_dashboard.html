@@ -1,0 +1,2264 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ORCA — Ocean Risk & Catch Advisor</title>
+
+  <script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
+  <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" />
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+
+  <script>
+    window.ORCA_CONFIG = {
+      API_BASE_URL: "http://localhost:8000"
+    };
+  </script>
+
+  <style>
+    :root {
+      --ocean-deep: #061a2b;
+      --ocean-mid: #0b2942;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: #f4f7fa;
+    }
+
+    .font-display { font-family: 'Space Grotesk', 'Inter', sans-serif; }
+
+    ::-webkit-scrollbar { width: 8px; height: 8px; }
+    ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 8px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+
+    .ocean-hero {
+      background:
+        radial-gradient(circle at 15% 20%, rgba(56,189,248,0.16), transparent 45%),
+        radial-gradient(circle at 85% 0%, rgba(37,99,235,0.14), transparent 50%),
+        linear-gradient(135deg, var(--ocean-deep) 0%, var(--ocean-mid) 55%, #113355 100%);
+    }
+
+    .chat-panel {
+      background:
+        radial-gradient(circle at 0% 0%, rgba(59,130,246,0.07), transparent 35%),
+        #ffffff;
+    }
+
+    .chat-scroll {
+      scrollbar-width: thin;
+      scrollbar-color: #cbd5e1 transparent;
+    }
+
+    .fade-in { animation: orcaFadeIn 0.35s ease both; }
+
+    @keyframes orcaFadeIn {
+      from { opacity: 0; transform: translateY(5px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    .pulse-dot { position: relative; }
+
+    .pulse-dot::after {
+      content: "";
+      position: absolute;
+      inset: -3px;
+      border-radius: 9999px;
+      border: 1.5px solid currentColor;
+      opacity: 0.6;
+      animation: orcaPulse 1.8s ease-out infinite;
+    }
+
+    @keyframes orcaPulse {
+      0% { transform: scale(0.7); opacity: 0.7; }
+      100% { transform: scale(1.9); opacity: 0; }
+    }
+
+    .typing-dot {
+      width: 5px;
+      height: 5px;
+      border-radius: 50%;
+      display: inline-block;
+      animation: typing 1.2s infinite ease-in-out;
+    }
+
+    .typing-dot:nth-child(2) { animation-delay: .15s; }
+    .typing-dot:nth-child(3) { animation-delay: .30s; }
+
+    @keyframes typing {
+      0%, 60%, 100% { transform: translateY(0); opacity: .35; }
+      30% { transform: translateY(-4px); opacity: 1; }
+    }
+
+    .pipeline-line {
+      background: repeating-linear-gradient(to bottom, #cbd5e1 0, #cbd5e1 4px, transparent 4px, transparent 9px);
+    }
+
+    .pipeline-line.active {
+      background: repeating-linear-gradient(to bottom, #2563eb 0, #2563eb 4px, transparent 4px, transparent 9px);
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      .pulse-dot::after, .fade-in, .typing-dot { animation: none; }
+    }
+  </style>
+</head>
+
+<body class="text-slate-800">
+<div id="root"></div>
+
+<script type="text/babel">
+const { useState, useEffect, useRef, useCallback } = React;
+
+// ============================================================================
+// CONFIG / API
+// ============================================================================
+
+function resolveApiBase() {
+  const params = new URLSearchParams(window.location.search);
+  const fromQuery = params.get("api");
+  if (fromQuery) return fromQuery.replace(/\/$/, "");
+
+  if (window.ORCA_CONFIG && window.ORCA_CONFIG.API_BASE_URL) {
+    return window.ORCA_CONFIG.API_BASE_URL.replace(/\/$/, "");
+  }
+
+  return "http://localhost:8000";
+}
+
+const API_BASE = resolveApiBase();
+const USER_ID = "demo-fisherman";
+const LOCATION = {
+  name: "Rameswaram",
+  latitude: 9.2876,
+  longitude: 79.3129
+};
+
+async function apiFetch(path, options = {}) {
+  const res = await fetch(`${API_BASE}${path}`, {
+    headers: {
+      "Content-Type": "application/json",
+      ...(options.headers || {})
+    },
+    ...options
+  });
+
+  let body = null;
+  try {
+    body = await res.json();
+  } catch (_) {}
+
+  if (!res.ok) {
+    const detail = body && (body.detail || body.message);
+    throw new Error(
+      typeof detail === "string"
+        ? detail
+        : `Request failed (${res.status})`
+    );
+  }
+
+  return body;
+}
+
+// ============================================================================
+// HELPERS
+// ============================================================================
+
+const NA = "Not available";
+
+function fmtDateTime(iso) {
+  if (!iso) return NA;
+  try {
+    return new Date(iso).toLocaleString("en-IN", {
+      timeZone: "Asia/Kolkata",
+      dateStyle: "medium",
+      timeStyle: "medium"
+    }) + " IST";
+  } catch (_) {
+    return iso;
+  }
+}
+
+function fmtClock(iso) {
+  if (!iso) return "--:--:--";
+  try {
+    return new Date(iso).toLocaleTimeString("en-IN", {
+      timeZone: "Asia/Kolkata",
+      hour12: false
+    });
+  } catch (_) {
+    return "--:--:--";
+  }
+}
+
+function fmtPercent(v) {
+  if (v === null || v === undefined) return NA;
+  return `${Math.round(v * 100)}%`;
+}
+
+function fmtKm(v) {
+  if (v === null || v === undefined) return NA;
+  return `${Number(v).toFixed(2)} km`;
+}
+
+function titleCase(s) {
+  if (!s && s !== 0) return NA;
+  return String(s)
+    .replace(/_/g, " ")
+    .toLowerCase()
+    .replace(/\b\w/g, c => c.toUpperCase());
+}
+
+function fmtValue(v) {
+  if (v === null || v === undefined || v === "") return NA;
+  if (typeof v === "number") return String(v);
+  if (typeof v === "boolean") return v ? "Yes" : "No";
+  return titleCase(String(v));
+}
+
+function getOrchestration(result) {
+  return result?.orchestration || {};
+}
+
+function getSelectedTools(result) {
+  const orchestration = getOrchestration(result);
+  return orchestration.selected_tools || result?.selected_tools || [];
+}
+
+// ============================================================================
+// RECOMMENDATION PRESENTATION
+// ============================================================================
+
+const RECOMMENDATION_STYLES = {
+  INSIDE_EEZ: { tone: "go", label: "Inside EEZ", icon: "fa-circle-check" },
+  OUTSIDE_EEZ: { tone: "avoid", label: "Outside EEZ", icon: "fa-triangle-exclamation" },
+  BOUNDARY_CROSSING: { tone: "avoid", label: "Boundary Crossing Detected", icon: "fa-ban" },
+  INSUFFICIENT_DATA: { tone: "caution", label: "Insufficient Data", icon: "fa-circle-question" },
+  DATA_UNAVAILABLE: { tone: "neutral", label: "Data Unavailable", icon: "fa-plug-circle-xmark" },
+  DATA_AVAILABLE: { tone: "neutral", label: "Data Available", icon: "fa-circle-info" }
+};
+
+const TONE_CLASSES = {
+  go: {
+    bg: "bg-emerald-50",
+    border: "border-emerald-200",
+    text: "text-emerald-800",
+    icon: "text-emerald-600 bg-emerald-500/10",
+    badge: "bg-emerald-600"
+  },
+  avoid: {
+    bg: "bg-rose-50",
+    border: "border-rose-200",
+    text: "text-rose-800",
+    icon: "text-rose-600 bg-rose-500/10",
+    badge: "bg-rose-600"
+  },
+  caution: {
+    bg: "bg-amber-50",
+    border: "border-amber-200",
+    text: "text-amber-800",
+    icon: "text-amber-600 bg-amber-500/10",
+    badge: "bg-amber-500"
+  },
+  neutral: {
+    bg: "bg-slate-50",
+    border: "border-slate-200",
+    text: "text-slate-700",
+    icon: "text-slate-500 bg-slate-500/10",
+    badge: "bg-slate-500"
+  }
+};
+
+function recommendationStyle(rec) {
+  return RECOMMENDATION_STYLES[rec] || {
+    tone: "neutral",
+    label: titleCase(rec),
+    icon: "fa-circle-info"
+  };
+}
+
+const SEVERITY_CLASSES = {
+  RED: "bg-rose-600 text-white",
+  AMBER: "bg-amber-500 text-white"
+};
+
+// ============================================================================
+// SMALL UI
+// ============================================================================
+
+function Badge({ children, className = "" }) {
+  return (
+    <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wide ${className}`}>
+      {children}
+    </span>
+  );
+}
+
+function LiveDot({ color = "bg-emerald-400", label }) {
+  return (
+    <span className="flex items-center gap-2 text-xs font-medium text-slate-500">
+      <span className={`w-2 h-2 rounded-full ${color} pulse-dot`}></span>
+      {label}
+    </span>
+  );
+}
+
+function StatCard({ title, children, icon }) {
+  return (
+    <div className="bg-white border border-slate-200 rounded-xl p-4 shadow-sm flex flex-col">
+      <h3 className="text-xs font-bold text-slate-800 uppercase tracking-wide mb-3 flex items-center gap-2">
+        {icon && <i className={`fa-solid ${icon} text-slate-400`}></i>}
+        {title}
+      </h3>
+      {children}
+    </div>
+  );
+}
+
+// ============================================================================
+// SIDEBAR
+// ============================================================================
+
+function Sidebar({
+  sidebarOpen,
+  setSidebarOpen,
+  activeView,
+  setActiveView,
+  health,
+  alertCount
+}) {
+  const navItems = [
+    { id: "dashboard", label: "Dashboard", icon: "fa-chart-pie" },
+    { id: "ask", label: "Ask ORCA", icon: "fa-comment-dots" },
+    { id: "alerts", label: "Safety Alerts", icon: "fa-shield-halved" },
+    { id: "pipeline", label: "Live Pipeline", icon: "fa-diagram-project" }
+  ];
+
+  const healthOnline = health.status === "online";
+
+  return (
+    <aside className={`${sidebarOpen ? "w-64" : "w-20"} bg-slate-900 text-slate-300 flex flex-col transition-all duration-300 z-30 relative flex-shrink-0`}>
+      <div className="h-16 flex items-center justify-between px-4 border-b border-slate-800">
+        <div className="flex items-center space-x-3 overflow-hidden">
+          <div className="w-10 h-10 rounded-xl bg-blue-600 flex items-center justify-center text-white font-display font-bold text-lg flex-shrink-0 shadow-lg shadow-blue-600/30">
+            <i className="fa-solid fa-water"></i>
+          </div>
+          {sidebarOpen && (
+            <div className="flex flex-col overflow-hidden">
+              <span className="text-lg font-bold font-display tracking-wide text-white leading-none whitespace-nowrap">ORCA</span>
+              <span className="text-[10px] text-slate-400 font-medium whitespace-nowrap">Ocean Risk &amp; Catch Advisor</span>
+            </div>
+          )}
+        </div>
+
+        <button
+          onClick={() => setSidebarOpen(!sidebarOpen)}
+          className="p-2 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition flex-shrink-0"
+        >
+          <i className={`fa-solid ${sidebarOpen ? "fa-angle-left" : "fa-angle-right"}`}></i>
+        </button>
+      </div>
+
+      <nav className="flex-1 py-6 px-3 space-y-1.5 overflow-y-auto">
+        {navItems.map(item => (
+          <button
+            key={item.id}
+            onClick={() => setActiveView(item.id)}
+            className={`w-full flex items-center space-x-3.5 px-3.5 py-3 rounded-xl text-xs font-semibold transition ${
+              activeView === item.id
+                ? "bg-blue-600 text-white shadow-md shadow-blue-600/20"
+                : "text-slate-400 hover:bg-slate-800/80 hover:text-slate-200"
+            }`}
+            title={!sidebarOpen ? item.label : undefined}
+          >
+            <i className={`fa-solid ${item.icon} text-base w-5 text-center`}></i>
+            {sidebarOpen && (
+              <span className="flex-1 text-left">{item.label}</span>
+            )}
+            {sidebarOpen && item.id === "alerts" && alertCount > 0 && (
+              <span className="min-w-5 h-5 px-1.5 rounded-full bg-rose-500 text-white text-[9px] flex items-center justify-center">
+                {alertCount}
+              </span>
+            )}
+          </button>
+        ))}
+      </nav>
+
+      <div className={`m-3 p-3 rounded-xl border ${
+        healthOnline
+          ? "bg-slate-800/60 border-slate-700/50"
+          : "bg-rose-950/40 border-rose-900/50"
+      }`}>
+        <div className="flex items-center space-x-2">
+          <span className={`w-2 h-2 rounded-full pulse-dot ${
+            healthOnline
+              ? "bg-emerald-500"
+              : health.status === "checking"
+                ? "bg-amber-400"
+                : "bg-rose-500"
+          }`}></span>
+          {sidebarOpen && (
+            <span className="text-[11px] font-bold text-white uppercase tracking-wide">
+              {healthOnline
+                ? "ORCA System Online"
+                : health.status === "checking"
+                  ? "Checking backend…"
+                  : "ORCA System Offline"}
+            </span>
+          )}
+        </div>
+        {sidebarOpen && (
+          <p className="text-[10px] text-slate-400 mt-1">
+            {healthOnline ? "Backend Connected" : "Backend unreachable"}
+          </p>
+        )}
+      </div>
+    </aside>
+  );
+}
+
+// ============================================================================
+// HEADER
+// ============================================================================
+
+function Header({ health, alertCount, onAlerts }) {
+  const [now, setNow] = useState(new Date());
+
+  useEffect(() => {
+    const t = setInterval(() => setNow(new Date()), 1000);
+    return () => clearInterval(t);
+  }, []);
+
+  const dateStr = now.toLocaleDateString("en-IN", {
+    timeZone: "Asia/Kolkata",
+    weekday: "short",
+    day: "2-digit",
+    month: "short",
+    year: "numeric"
+  });
+
+  const timeStr = now.toLocaleTimeString("en-IN", {
+    timeZone: "Asia/Kolkata",
+    hour12: false
+  });
+
+  return (
+    <header className="h-16 bg-white border-b border-slate-200 px-6 flex items-center justify-between z-20 flex-shrink-0">
+      <div>
+        <h1 className="font-display font-bold text-slate-900 leading-none text-lg">ORCA</h1>
+        <p className="text-[11px] text-slate-500 flex items-center gap-1">
+          <i className="fa-solid fa-location-dot text-slate-400"></i>
+          Rameswaram, Tamil Nadu
+        </p>
+      </div>
+
+      <div className="flex items-center gap-5">
+        <span className="hidden md:block text-xs text-slate-500 font-mono">
+          {dateStr} · {timeStr} IST
+        </span>
+
+        <div className="h-6 w-px bg-slate-200 hidden md:block"></div>
+
+        <button
+          onClick={onAlerts}
+          className="relative w-9 h-9 rounded-lg hover:bg-slate-100 text-slate-500 transition"
+          title="Safety alerts"
+        >
+          <i className="fa-regular fa-bell"></i>
+          {alertCount > 0 && (
+            <span className="absolute top-1 right-1 w-2 h-2 rounded-full bg-rose-500 border border-white"></span>
+          )}
+        </button>
+
+        <LiveDot
+          color={
+            health.status === "online"
+              ? "bg-emerald-500"
+              : health.status === "checking"
+                ? "bg-amber-400"
+                : "bg-rose-500"
+          }
+          label={
+            health.status === "online"
+              ? "LIVE"
+              : health.status === "checking"
+                ? "CONNECTING"
+                : "OFFLINE"
+          }
+        />
+      </div>
+    </header>
+  );
+}
+
+// ============================================================================
+// CHAT
+// ============================================================================
+
+const QUICK_PROMPTS = [
+  {
+    en: "Is it safe to fish tomorrow near Rameswaram?",
+    ta: "நாளை ராமேஸ்வரம் அருகே மீன் பிடிக்க பாதுகாப்பானதா?"
+  },
+  {
+    en: "Am I near the maritime boundary?",
+    ta: "நான் கடல் எல்லைக்கு அருகில் இருக்கிறேனா?"
+  },
+  {
+    en: "Check my fishing zone",
+    ta: "எனது மீன்பிடி பகுதியை சரிபார்க்கவும்"
+  }
+];
+
+function ChatBubble({ message }) {
+  const isUser = message.role === "user";
+
+  return (
+    <div className={`flex ${isUser ? "justify-end" : "justify-start"} fade-in`}>
+      <div className={`max-w-[88%] flex items-end gap-2 ${isUser ? "flex-row-reverse" : ""}`}>
+        <div className={`w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 ${
+          isUser
+            ? "bg-slate-200 text-slate-600"
+            : "bg-blue-600 text-white shadow-sm"
+        }`}>
+          <i className={`fa-solid ${isUser ? "fa-user" : "fa-water"} text-xs`}></i>
+        </div>
+
+        <div>
+          <div className={`rounded-2xl px-4 py-3 text-sm leading-relaxed ${
+            isUser
+              ? "bg-blue-600 text-white rounded-br-md"
+              : "bg-slate-100 text-slate-700 rounded-bl-md"
+          }`}>
+            {message.content}
+          </div>
+
+          <div className={`text-[10px] text-slate-400 mt-1 ${isUser ? "text-right" : ""}`}>
+            {message.time}
+            {!isUser && message.result && (
+              <span className="ml-2">
+                · {titleCase(message.result.recommendation || "response")}
+              </span>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function TypingBubble() {
+  return (
+    <div className="flex justify-start fade-in">
+      <div className="max-w-[88%] flex items-end gap-2">
+        <div className="w-8 h-8 rounded-full bg-blue-600 text-white flex items-center justify-center flex-shrink-0">
+          <i className="fa-solid fa-water text-xs"></i>
+        </div>
+
+        <div className="bg-slate-100 rounded-2xl rounded-bl-md px-4 py-3">
+          <div className="flex items-center gap-1">
+            <span className="typing-dot bg-slate-500"></span>
+            <span className="typing-dot bg-slate-500"></span>
+            <span className="typing-dot bg-slate-500"></span>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ChatPanel({
+  messages,
+  language,
+  setLanguage,
+  onSend,
+  loading,
+  inputRef,
+  onClear
+}) {
+  const [text, setText] = useState("");
+  const scrollRef = useRef(null);
+
+  useEffect(() => {
+    if (scrollRef.current) {
+      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+    }
+  }, [messages, loading]);
+
+  const submit = (value) => {
+    const question = (value !== undefined ? value : text).trim();
+    if (!question || loading) return;
+    onSend(question);
+    setText("");
+  };
+
+  return (
+    <div className="chat-panel border border-slate-200 rounded-2xl shadow-sm overflow-hidden">
+      <div className="px-5 py-4 border-b border-slate-200 flex items-center justify-between gap-3">
+        <div className="flex items-center gap-3">
+          <div className="w-10 h-10 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center">
+            <i className="fa-solid fa-comments"></i>
+          </div>
+          <div>
+            <h2 className="font-display font-bold text-slate-900">Ask ORCA</h2>
+            <p className="text-[11px] text-slate-400">
+              Real-time conversation with the ORCA backend
+            </p>
+          </div>
+        </div>
+
+        <div className="flex items-center gap-2">
+          <div className="flex bg-slate-100 rounded-lg p-1">
+            {["en", "ta"].map(lng => (
+              <button
+                key={lng}
+                onClick={() => setLanguage(lng)}
+                className={`px-2.5 py-1 rounded-md text-[11px] font-semibold transition ${
+                  language === lng
+                    ? "bg-white text-slate-900 shadow-sm"
+                    : "text-slate-500 hover:text-slate-800"
+                }`}
+              >
+                {lng === "en" ? "EN" : "தமிழ்"}
+              </button>
+            ))}
+          </div>
+
+          <button
+            onClick={onClear}
+            className="w-8 h-8 rounded-lg border border-slate-200 text-slate-400 hover:text-slate-700 hover:bg-slate-50 transition"
+            title="Clear conversation"
+          >
+            <i className="fa-solid fa-rotate-left text-xs"></i>
+          </button>
+        </div>
+      </div>
+
+      <div
+        ref={scrollRef}
+        className="chat-scroll h-[430px] overflow-y-auto p-5 space-y-4 bg-slate-50/70"
+      >
+        {messages.map((m, i) => (
+          <ChatBubble key={m.id || i} message={m} />
+        ))}
+
+        {loading && <TypingBubble />}
+
+        {messages.length === 1 && !loading && (
+          <div className="pt-2">
+            <p className="text-[11px] text-slate-400 mb-2 font-medium">
+              Try asking:
+            </p>
+            <div className="flex flex-wrap gap-2">
+              {QUICK_PROMPTS.map((p, i) => (
+                <button
+                  key={i}
+                  onClick={() => submit(p[language])}
+                  className="text-[11px] text-blue-700 bg-blue-50 hover:bg-blue-100 border border-blue-100 px-3 py-2 rounded-full transition text-left"
+                >
+                  {p[language]}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+
+      <div className="p-4 bg-white border-t border-slate-200">
+        <div className="flex items-center gap-2 border border-slate-200 rounded-xl p-2 focus-within:border-blue-400 focus-within:ring-2 focus-within:ring-blue-100 transition">
+          <button
+            disabled
+            title="Voice input is not connected in this prototype"
+            className="w-9 h-9 rounded-lg bg-slate-100 text-slate-300 flex items-center justify-center cursor-not-allowed flex-shrink-0"
+          >
+            <i className="fa-solid fa-microphone"></i>
+          </button>
+
+          <input
+            ref={inputRef}
+            value={text}
+            onChange={e => setText(e.target.value)}
+            onKeyDown={e => {
+              if (e.key === "Enter" && !e.shiftKey) {
+                e.preventDefault();
+                submit();
+              }
+            }}
+            disabled={loading}
+            placeholder={
+              language === "ta"
+                ? "உங்கள் அடுத்த கேள்வியை கேளுங்கள்…"
+                : "Ask a follow-up question…"
+            }
+            className="flex-1 min-w-0 px-1 py-2 text-sm bg-transparent outline-none disabled:opacity-60"
+          />
+
+          <button
+            onClick={() => submit()}
+            disabled={loading || !text.trim()}
+            className="w-10 h-10 rounded-lg bg-blue-600 hover:bg-blue-700 disabled:bg-slate-300 text-white flex items-center justify-center transition flex-shrink-0"
+            title="Send"
+          >
+            {loading
+              ? <i className="fa-solid fa-circle-notch fa-spin text-xs"></i>
+              : <i className="fa-solid fa-paper-plane text-xs"></i>}
+          </button>
+        </div>
+
+        <p className="text-[10px] text-slate-400 mt-2 flex items-center gap-1.5">
+          <i className="fa-solid fa-location-dot"></i>
+          Using demo location: {LOCATION.name} · {LOCATION.latitude}, {LOCATION.longitude}
+        </p>
+      </div>
+    </div>
+  );
+}
+
+// ============================================================================
+// DECISION / RESULT CARDS
+// ============================================================================
+
+function DecisionCard({ result }) {
+  const rec = result?.recommendation;
+  const style = recommendationStyle(rec);
+  const tone = TONE_CLASSES[style.tone];
+
+  return (
+    <div className={`rounded-2xl p-6 shadow-sm border ${tone.bg} ${tone.border} fade-in`}>
+      <div className="grid grid-cols-1 md:grid-cols-12 gap-6 items-start">
+        <div className="md:col-span-7 flex items-start gap-4">
+          <div className={`p-3.5 rounded-2xl flex items-center justify-center flex-shrink-0 ${tone.icon}`}>
+            <i className={`fa-solid ${style.icon} text-3xl`}></i>
+          </div>
+
+          <div className="min-w-0">
+            <div className="flex items-center gap-2 flex-wrap mb-1">
+              <h2 className={`font-display text-2xl font-bold tracking-tight ${tone.text}`}>
+                {style.label}
+              </h2>
+              <Badge className={`${tone.badge} text-white`}>
+                {rec || "UNKNOWN"}
+              </Badge>
+            </div>
+
+            <p className={`text-sm leading-relaxed ${tone.text} opacity-90`}>
+              {result?.answer || "No explanation returned by the backend."}
+            </p>
+          </div>
+        </div>
+
+        <div className="md:col-span-5 grid grid-cols-2 gap-3 text-xs">
+          <div className="bg-white/70 rounded-lg p-3 border border-white">
+            <p className="text-slate-500 font-medium mb-0.5">Confidence</p>
+            <p className="font-bold text-slate-800 text-base">
+              {fmtPercent(result?.confidence)}
+            </p>
+          </div>
+
+          <div className="bg-white/70 rounded-lg p-3 border border-white">
+            <p className="text-slate-500 font-medium mb-0.5">Quality</p>
+            <p className="font-bold text-slate-800 text-base">
+              {fmtValue(result?.quality)}
+            </p>
+          </div>
+
+          <div className="bg-white/70 rounded-lg p-3 border border-white col-span-2">
+            <p className="text-slate-500 font-medium mb-0.5">
+              Distance to EEZ boundary
+            </p>
+            <p className="font-bold text-slate-800 text-base">
+              {fmtKm(result?.geospatial?.distance_km)}
+            </p>
+          </div>
+
+          <div className="bg-white/70 rounded-lg p-3 border border-white col-span-2">
+            <p className="text-slate-500 font-medium mb-0.5">Source · Timestamp</p>
+            <p className="font-semibold text-slate-700">
+              {fmtValue(result?.geospatial?.source)}
+            </p>
+            <p className="text-slate-500">
+              {fmtDateTime(result?.timestamp_utc)}
+            </p>
+          </div>
+        </div>
+      </div>
+
+      <div className="mt-4 pt-3 border-t border-black/5 flex items-center gap-2 text-[11px] font-semibold text-slate-500">
+        <i className="fa-solid fa-shield-halved"></i>
+        ORCA orchestrator · query type: {fmtValue(result?.query_type)}
+      </div>
+    </div>
+  );
+}
+
+function ScoreGauge({ value, label, ringClass }) {
+  const available = value !== null && value !== undefined;
+  const pct = available ? Math.max(0, Math.min(100, Number(value))) : 0;
+
+  return (
+    <div className="relative w-20 h-20 flex items-center justify-center flex-shrink-0">
+      <svg className="w-full h-full -rotate-90" viewBox="0 0 36 36">
+        <path
+          className="text-slate-200"
+          strokeWidth="3"
+          stroke="currentColor"
+          fill="none"
+          d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"
+        />
+        {available && (
+          <path
+            className={ringClass}
+            strokeWidth="3.5"
+            strokeDasharray={`${pct}, 100`}
+            strokeLinecap="round"
+            stroke="currentColor"
+            fill="none"
+            d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"
+          />
+        )}
+      </svg>
+
+      <div className="absolute text-center">
+        {available ? (
+          <>
+            <span className="text-xl font-black text-slate-800">{value}</span>
+            <span className="block text-[10px] text-slate-400 font-medium -mt-1">/100</span>
+          </>
+        ) : (
+          <i className="fa-regular fa-circle-question text-slate-300 text-xl"></i>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function ScoreCards({ result }) {
+  return (
+    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+      <div className="bg-white border border-slate-200 rounded-xl p-5 shadow-sm flex items-center gap-4">
+        <ScoreGauge
+          value={result?.safety_score}
+          label="Safety"
+          ringClass="text-amber-500"
+        />
+        <div>
+          <h3 className="text-xs font-bold text-slate-800 uppercase tracking-wide">
+            Safety Score
+          </h3>
+          <p className="text-xs text-slate-500 mt-1">
+            {result?.safety_score === null || result?.safety_score === undefined
+              ? "Not returned for this response."
+              : "Reported by ORCA decision engine."}
+          </p>
+        </div>
+      </div>
+
+      <div className="bg-white border border-slate-200 rounded-xl p-5 shadow-sm flex items-center gap-4">
+        <ScoreGauge
+          value={result?.yield_score}
+          label="Yield"
+          ringClass="text-emerald-500"
+        />
+        <div>
+          <h3 className="text-xs font-bold text-slate-800 uppercase tracking-wide">
+            Fishing Yield
+          </h3>
+          <p className="text-xs text-slate-500 mt-1">
+            {result?.yield_score === null || result?.yield_score === undefined
+              ? "Not returned for this response."
+              : "Reported by ORCA decision engine."}
+          </p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ToolEvidenceRows({ toolResult }) {
+  if (!toolResult) {
+    return <p className="text-xs text-slate-400 italic">Not requested for this query.</p>;
+  }
+
+  if (toolResult.status !== "available") {
+    return (
+      <p className="text-xs text-slate-500">
+        {NA}
+        {toolResult.reason ? ` — ${titleCase(toolResult.reason)}` : ""}
+      </p>
+    );
+  }
+
+  const vars = toolResult.variables || {};
+  const entries = Object.entries(vars);
+
+  if (!entries.length) {
+    return <p className="text-xs text-slate-400 italic">No variables returned.</p>;
+  }
+
+  return (
+    <div className="space-y-2 text-xs">
+      {entries.map(([k, v]) => (
+        <div
+          key={k}
+          className="flex items-start justify-between border-b border-slate-100 pb-1.5 last:border-0 last:pb-0 gap-3"
+        >
+          <span className="font-medium text-slate-600">{titleCase(k)}</span>
+          <span className="text-slate-700 text-right break-words">{fmtValue(v)}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function EvidenceCard({ result }) {
+  return (
+    <StatCard title="Evidence" icon="fa-flask">
+      <div className="space-y-4">
+        <div>
+          <p className="text-[11px] font-bold text-slate-400 uppercase mb-1.5 flex items-center gap-1.5">
+            <i className="fa-solid fa-cloud-sun"></i> Weather
+          </p>
+          <ToolEvidenceRows toolResult={result?.weather} />
+        </div>
+
+        <div>
+          <p className="text-[11px] font-bold text-slate-400 uppercase mb-1.5 flex items-center gap-1.5">
+            <i className="fa-solid fa-water"></i> Marine / SST / Waves / Currents
+          </p>
+          <ToolEvidenceRows toolResult={result?.marine} />
+        </div>
+      </div>
+    </StatCard>
+  );
+}
+
+function GeofenceCard({ result }) {
+  const geo = result?.geospatial || {};
+  const available = geo.status === "available";
+  const inside = geo.inside;
+
+  return (
+    <StatCard title="Geofence Result" icon="fa-map-location-dot">
+      <div className="relative w-full h-28 bg-blue-50 border border-slate-200 rounded-lg overflow-hidden mb-3 flex items-center justify-center">
+        <div className="absolute inset-0 bg-sky-100/50"></div>
+
+        <div className={`w-16 h-16 rounded-full border flex items-center justify-center ${
+          inside === true
+            ? "border-emerald-400 bg-emerald-200/30"
+            : inside === false
+              ? "border-rose-400 bg-rose-200/30"
+              : "border-slate-300 bg-slate-200/30"
+        }`}>
+          <div className={`w-2 h-2 rounded-full ring-4 ${
+            inside === true
+              ? "bg-emerald-600 ring-emerald-400/40"
+              : inside === false
+                ? "bg-rose-600 ring-rose-400/40"
+                : "bg-slate-500 ring-slate-400/40"
+          }`}></div>
+        </div>
+
+        <span className="absolute bottom-1.5 left-2 text-[10px] text-slate-500 font-mono">
+          {LOCATION.name} · {LOCATION.latitude.toFixed(4)}°N, {LOCATION.longitude.toFixed(4)}°E
+        </span>
+      </div>
+
+      <div className="space-y-1.5 text-xs mt-auto">
+        {!available ? (
+          <div className="flex items-center gap-2 text-slate-500">
+            <i className="fa-regular fa-circle-question"></i>
+            <span>{NA}{geo.reason ? ` — ${titleCase(geo.reason)}` : ""}</span>
+          </div>
+        ) : (
+          <>
+            <div className={`flex items-center gap-2 font-medium ${
+              inside ? "text-emerald-600" : "text-rose-600"
+            }`}>
+              <i className={`fa-solid ${
+                inside ? "fa-circle-check" : "fa-triangle-exclamation"
+              }`}></i>
+              <span>{inside ? "Inside Indian EEZ" : "Outside Indian EEZ"}</span>
+            </div>
+
+            <div className="flex items-center gap-2 text-slate-600">
+              <i className="fa-regular fa-compass text-slate-400"></i>
+              <span>Distance to boundary: {fmtKm(geo.distance_km)}</span>
+            </div>
+          </>
+        )}
+      </div>
+    </StatCard>
+  );
+}
+
+function SourcesCard({ sources }) {
+  const list = sources || [];
+
+  return (
+    <StatCard title="Data Sources" icon="fa-database">
+      {!list.length ? (
+        <p className="text-xs text-slate-400 italic">
+          No sources returned for this response.
+        </p>
+      ) : (
+        <div className="space-y-2.5 text-xs">
+          {list.map((src, idx) => (
+            <div
+              key={idx}
+              className="flex items-start justify-between gap-2 border-b border-slate-100 pb-2 last:border-0 last:pb-0"
+            >
+              <div className="flex items-start gap-2 min-w-0">
+                <i className="fa-regular fa-file-lines text-slate-400 mt-0.5 flex-shrink-0"></i>
+                <div className="min-w-0">
+                  <p className="font-semibold text-slate-700 leading-tight truncate">
+                    {src.source || titleCase(src.tool)}
+                  </p>
+                  <p className="text-[10px] text-slate-400 mt-0.5">
+                    {fmtDateTime(src.timestamp)}
+                  </p>
+                </div>
+              </div>
+
+              <Badge className={
+                src.status === "available"
+                  ? "bg-emerald-100 text-emerald-700 flex-shrink-0"
+                  : "bg-slate-100 text-slate-500 flex-shrink-0"
+              }>
+                {src.status === "available" ? "Live" : fmtValue(src.status)}
+              </Badge>
+            </div>
+          ))}
+        </div>
+      )}
+    </StatCard>
+  );
+}
+
+function AdditionalInfoCard({ result }) {
+  const tools = getSelectedTools(result);
+
+  const rows = [
+    { icon: "fa-clock", label: "Updated", value: fmtDateTime(result?.timestamp_utc) },
+    { icon: "fa-chart-simple", label: "Confidence", value: fmtPercent(result?.confidence) },
+    { icon: "fa-location-dot", label: "Location", value: LOCATION.name },
+    {
+      icon: "fa-compass",
+      label: "Coordinates",
+      value: `${LOCATION.latitude}° N, ${LOCATION.longitude}° E`
+    },
+    {
+      icon: "fa-wrench",
+      label: "Tools Used",
+      value: tools.map(titleCase).join(", ") || NA
+    },
+    {
+      icon: "fa-list-check",
+      label: "Execution Status",
+      value: fmtValue(result?.execution_status)
+    }
+  ];
+
+  return (
+    <StatCard title="Additional Info" icon="fa-circle-info">
+      <div className="space-y-2.5 text-xs">
+        {rows.map((r, i) => (
+          <div
+            key={i}
+            className="flex items-center justify-between pb-1.5 border-b border-slate-100 last:border-0 gap-3"
+          >
+            <div className="flex items-center gap-2 text-slate-500">
+              <i className={`fa-solid ${r.icon} w-4`}></i>
+              <span>{r.label}:</span>
+            </div>
+            <span className="text-slate-700 font-medium text-right break-words">
+              {r.value}
+            </span>
+          </div>
+        ))}
+      </div>
+
+      {(result?.execution_errors || []).length > 0 && (
+        <div className="mt-3 bg-rose-50 border border-rose-200 rounded-lg p-2.5 text-[11px] text-rose-700">
+          <p className="font-semibold mb-1">Execution warnings</p>
+          <ul className="list-disc list-inside space-y-0.5">
+            {result.execution_errors.map((e, i) => (
+              <li key={i}>{e}</li>
+            ))}
+          </ul>
+        </div>
+      )}
+    </StatCard>
+  );
+}
+
+// ============================================================================
+// PIPELINE
+// ============================================================================
+
+const PIPELINE_ICONS = {
+  weather: "fa-cloud-sun",
+  marine: "fa-water",
+  geospatial: "fa-earth-asia"
+};
+
+function buildPipelineStages(result, question, loading, error) {
+  const stages = [
+    {
+      key: "query",
+      label: "USER QUERY",
+      detail: question ? `"${question}"` : null
+    }
+  ];
+
+  if (!question) return stages;
+
+  stages.push({
+    key: "orchestrator",
+    label: "ORCA ORCHESTRATOR",
+    detail: loading
+      ? "Awaiting backend response…"
+      : `Query type: ${fmtValue(result?.query_type)}`
+  });
+
+  if (loading) {
+    stages.push({
+      key: "pending",
+      label: "PROCESSING",
+      detail: "Waiting for live backend tools and decision engine…",
+      pending: true
+    });
+    return stages;
+  }
+
+  if (error) {
+    stages.push({
+      key: "error",
+      label: "REQUEST FAILED",
+      detail: error,
+      error: true
+    });
+    return stages;
+  }
+
+  const tools = getSelectedTools(result);
+
+  stages.push({
+    key: "tool_selection",
+    label: "TOOL SELECTION",
+    detail: tools.length
+      ? tools.map(titleCase).join(", ")
+      : "No tools selected"
+  });
+
+  tools.forEach(tool => {
+    const toolResult =
+      result?.[tool] ||
+      result?.tool_results?.[tool];
+
+    stages.push({
+      key: `tool_${tool}`,
+      label: titleCase(tool).toUpperCase(),
+      icon: PIPELINE_ICONS[tool],
+      detail: toolResult
+        ? `${fmtValue(toolResult.status)}${toolResult.source ? " · " + toolResult.source : ""}`
+        : "No result",
+      failed: toolResult && toolResult.status !== "available"
+    });
+  });
+
+  if (tools.includes("geospatial")) {
+    stages.push({
+      key: "postgis",
+      label: "POSTGIS / DATA SOURCE",
+      detail: result?.geospatial?.source || "Marine Regions World EEZ v12"
+    });
+  }
+
+  stages.push({
+    key: "decision",
+    label: "DECISION ENGINE",
+    detail: `Recommendation: ${fmtValue(result?.recommendation)}`
+  });
+
+  stages.push({
+    key: "response",
+    label: "ORCA RESPONSE",
+    detail: result?.timestamp_utc
+      ? `Received ${fmtClock(result.timestamp_utc)} IST`
+      : "Response received"
+  });
+
+  return stages;
+}
+
+function PipelineDiagram({ result, question, loading, error }) {
+  const stages = buildPipelineStages(result, question, loading, error);
+
+  if (!question) {
+    return (
+      <div className="text-sm text-slate-400 italic py-10 text-center">
+        Ask ORCA a question to see the real pipeline in action.
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-0">
+      {stages.map((stage, idx) => (
+        <div key={stage.key} className="flex gap-4">
+          <div className="flex flex-col items-center">
+            <div className={`w-9 h-9 rounded-full flex items-center justify-center text-xs font-bold flex-shrink-0 ${
+              stage.error
+                ? "bg-rose-100 text-rose-600 border-2 border-rose-300"
+                : stage.failed
+                  ? "bg-amber-100 text-amber-600 border-2 border-amber-300"
+                  : stage.pending
+                    ? "bg-blue-50 text-blue-500 border-2 border-blue-300"
+                    : "bg-blue-600 text-white"
+            }`}>
+              {stage.pending
+                ? <i className="fa-solid fa-circle-notch fa-spin"></i>
+                : stage.icon
+                  ? <i className={`fa-solid ${stage.icon}`}></i>
+                  : idx + 1}
+            </div>
+
+            {idx < stages.length - 1 && (
+              <div className={`w-px flex-1 min-h-[28px] pipeline-line ${
+                !stage.pending && !stage.error ? "active" : ""
+              }`}></div>
+            )}
+          </div>
+
+          <div className="pb-6 min-w-0">
+            <p className="text-xs font-bold text-slate-800 tracking-wide">
+              {stage.label}
+            </p>
+            {stage.detail && (
+              <p className="text-xs text-slate-500 mt-0.5 break-words">
+                {stage.detail}
+              </p>
+            )}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function LiveLogs({ log }) {
+  const endRef = useRef(null);
+
+  useEffect(() => {
+    if (endRef.current) {
+      endRef.current.scrollIntoView({ block: "nearest" });
+    }
+  }, [log.length]);
+
+  return (
+    <div className="bg-slate-950 rounded-xl p-4 h-64 overflow-y-auto font-mono text-[11px] text-emerald-400 space-y-1">
+      {!log.length ? (
+        <p className="text-slate-500 italic">
+          No activity yet. Ask ORCA a question.
+        </p>
+      ) : (
+        log.map((line, i) => (
+          <p key={i} className="whitespace-pre-wrap leading-relaxed">
+            <span className="text-slate-500">[{line.time}]</span> {line.text}
+          </p>
+        ))
+      )}
+      <div ref={endRef}></div>
+    </div>
+  );
+}
+
+// ============================================================================
+// SAFETY ALERTS
+// ============================================================================
+
+function AlertRow({ alert }) {
+  return (
+    <div className="border border-slate-200 rounded-xl p-4 bg-white shadow-sm flex flex-col gap-2">
+      <div className="flex items-center justify-between flex-wrap gap-2">
+        <Badge className={
+          SEVERITY_CLASSES[alert.severity] || "bg-slate-400 text-white"
+        }>
+          {alert.severity}
+        </Badge>
+
+        <span className="text-[11px] text-slate-400">
+          {fmtDateTime(alert.created_at)}
+        </span>
+      </div>
+
+      <p className="font-semibold text-slate-800 text-sm">{alert.title}</p>
+      <p className="text-sm text-slate-600 leading-relaxed">{alert.message}</p>
+
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-[11px] text-slate-500 mt-1 pt-2 border-t border-slate-100">
+        <div>
+          <span className="text-slate-400">Zone: </span>
+          {fmtValue(alert.zone_id)}
+        </div>
+        <div>
+          <span className="text-slate-400">Inside EEZ: </span>
+          {fmtValue(alert.inside_eez)}
+        </div>
+        <div>
+          <span className="text-slate-400">Distance: </span>
+          {fmtKm(alert.boundary_distance_km)}
+        </div>
+        <div>
+          <span className="text-slate-400">Status: </span>
+          {fmtValue(alert.delivery_status)}
+        </div>
+      </div>
+
+      <div className="text-[10px] text-slate-400 flex items-center gap-1">
+        <i className="fa-solid fa-database"></i>
+        {fmtValue(alert.source)} · {fmtDateTime(alert.source_timestamp)}
+      </div>
+    </div>
+  );
+}
+
+function SafetyAlertsView({ onRefreshCount }) {
+  const [alerts, setAlerts] = useState({
+    status: "loading",
+    data: [],
+    error: null
+  });
+
+  const [poller, setPoller] = useState({
+    status: "loading",
+    data: null,
+    error: null
+  });
+
+  const [zoneCount, setZoneCount] = useState(null);
+  const [checking, setChecking] = useState(false);
+
+  const loadAlerts = useCallback(async () => {
+    setAlerts(s => ({ ...s, status: "loading" }));
+
+    try {
+      const data = await apiFetch(
+        `/api/v1/alerts/active?user_id=${encodeURIComponent(USER_ID)}`
+      );
+
+      const list = data.alerts || [];
+      setAlerts({
+        status: "loaded",
+        data: list,
+        error: null
+      });
+
+      onRefreshCount(list.length);
+    } catch (e) {
+      setAlerts({
+        status: "error",
+        data: [],
+        error: e.message
+      });
+    }
+  }, [onRefreshCount]);
+
+  const loadPoller = useCallback(async () => {
+    try {
+      const data = await apiFetch("/api/v1/alerts/poller/status");
+      setPoller({
+        status: "loaded",
+        data,
+        error: null
+      });
+    } catch (e) {
+      setPoller({
+        status: "error",
+        data: null,
+        error: e.message
+      });
+    }
+  }, []);
+
+  const loadZones = useCallback(async () => {
+    try {
+      const data = await apiFetch(
+        `/api/v1/alerts/zones?user_id=${encodeURIComponent(USER_ID)}`
+      );
+      setZoneCount((data.zones || []).length);
+    } catch (_) {
+      setZoneCount(null);
+    }
+  }, []);
+
+  const runCheck = async () => {
+    setChecking(true);
+
+    try {
+      await apiFetch("/api/v1/alerts/check", {
+        method: "POST",
+        body: JSON.stringify({
+          user_id: USER_ID,
+          force: false
+        })
+      });
+
+      await Promise.all([loadAlerts(), loadPoller()]);
+    } catch (e) {
+      setAlerts(s => ({
+        ...s,
+        error: e.message
+      }));
+    } finally {
+      setChecking(false);
+    }
+  };
+
+  useEffect(() => {
+    loadAlerts();
+    loadPoller();
+    loadZones();
+
+    const t = setInterval(() => {
+      loadAlerts();
+      loadPoller();
+    }, 30000);
+
+    return () => clearInterval(t);
+  }, [loadAlerts, loadPoller, loadZones]);
+
+  const p = poller.data;
+
+  return (
+    <div className="space-y-5 fade-in">
+      <div className="bg-white border border-slate-200 rounded-xl p-5 shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-4">
+        <div>
+          <h2 className="font-display text-xl font-bold text-slate-900">
+            Safety Alerts
+          </h2>
+          <p className="text-xs text-slate-500 mt-1">
+            Proactive EEZ geofence alerts for saved frequent zones
+            {zoneCount !== null ? ` · monitoring ${zoneCount} zone(s)` : ""}.
+          </p>
+        </div>
+
+        <div className="flex gap-2">
+          <button
+            onClick={() => {
+              loadAlerts();
+              loadPoller();
+            }}
+            className="flex items-center gap-1.5 border border-slate-200 bg-white hover:bg-slate-50 px-3 py-2 rounded-lg text-xs font-medium text-slate-600 transition"
+          >
+            <i className="fa-solid fa-rotate-right"></i>
+            Refresh
+          </button>
+
+          <button
+            onClick={runCheck}
+            disabled={checking}
+            className="flex items-center gap-1.5 bg-blue-600 hover:bg-blue-700 disabled:bg-slate-300 text-white px-3 py-2 rounded-lg text-xs font-semibold transition"
+          >
+            {checking
+              ? <i className="fa-solid fa-circle-notch fa-spin"></i>
+              : <i className="fa-solid fa-satellite-dish"></i>}
+            Run Geofence Check
+          </button>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
+        <div className="lg:col-span-2 space-y-3">
+          {alerts.status === "loading" && (
+            <div className="bg-white border border-slate-200 rounded-xl p-10 text-center">
+              <i className="fa-solid fa-circle-notch fa-spin text-blue-600 text-xl"></i>
+            </div>
+          )}
+
+          {alerts.status === "error" && (
+            <div className="bg-rose-50 border border-rose-200 rounded-xl p-5 text-sm text-rose-700">
+              {alerts.error}
+            </div>
+          )}
+
+          {alerts.status === "loaded" && alerts.data.length === 0 && (
+            <div className="bg-white border border-dashed border-slate-300 rounded-xl p-10 text-center text-sm text-slate-400">
+              No active alerts for this user right now.
+            </div>
+          )}
+
+          {alerts.status === "loaded" &&
+            alerts.data.map(a => <AlertRow key={a.id} alert={a} />)}
+        </div>
+
+        <StatCard title="Background Monitoring" icon="fa-satellite">
+          {poller.status === "loading" && (
+            <p className="text-xs text-slate-400">Checking poller status…</p>
+          )}
+
+          {poller.status === "error" && (
+            <p className="text-xs text-rose-500">{poller.error}</p>
+          )}
+
+          {poller.status === "loaded" && p && (
+            <div className="space-y-2.5 text-xs">
+              <div className="flex items-center justify-between pb-1.5 border-b border-slate-100">
+                <span className="text-slate-500">Poller</span>
+                <Badge className={
+                  p.running
+                    ? "bg-emerald-100 text-emerald-700"
+                    : "bg-rose-100 text-rose-700"
+                }>
+                  {p.running ? "RUNNING" : "STOPPED"}
+                </Badge>
+              </div>
+
+              <div className="flex items-center justify-between pb-1.5 border-b border-slate-100">
+                <span className="text-slate-500">Interval</span>
+                <span className="font-medium text-slate-700">
+                  {p.interval_seconds
+                    ? `${(p.interval_seconds / 3600).toFixed(1)} hours`
+                    : NA}
+                </span>
+              </div>
+
+              <div className="flex items-center justify-between pb-1.5 border-b border-slate-100">
+                <span className="text-slate-500">Last check</span>
+                <span className="font-medium text-slate-700 text-right">
+                  {fmtDateTime(p.last_run_at)}
+                </span>
+              </div>
+
+              <div className="flex items-center justify-between">
+                <span className="text-slate-500">Last error</span>
+                <span className={`font-medium text-right ${
+                  p.last_error ? "text-rose-600" : "text-emerald-600"
+                }`}>
+                  {p.last_error || "None"}
+                </span>
+              </div>
+
+              {p.last_result && (
+                <div className="mt-2 pt-2 border-t border-slate-100 text-[11px] text-slate-500">
+                  Last run checked {fmtValue(p.last_result.checked_zones)} zone(s),
+                  created {fmtValue(p.last_result.alerts_created)} alert(s).
+                </div>
+              )}
+            </div>
+          )}
+        </StatCard>
+      </div>
+    </div>
+  );
+}
+
+// ============================================================================
+// DASHBOARD
+// ============================================================================
+
+function DashboardView({
+  chat,
+  result,
+  lastQuestion,
+  loading,
+  error,
+  language,
+  setLanguage,
+  inputRef,
+  onSend,
+  onClear,
+  log
+}) {
+  return (
+    <div className="space-y-5">
+      <ChatPanel
+        messages={chat}
+        language={language}
+        setLanguage={setLanguage}
+        onSend={onSend}
+        loading={loading}
+        inputRef={inputRef}
+        onClear={onClear}
+      />
+
+      {loading && (
+        <div className="bg-white border border-slate-200 rounded-xl p-5 shadow-sm flex items-center gap-3 fade-in">
+          <i className="fa-solid fa-circle-notch fa-spin text-blue-600"></i>
+          <div>
+            <p className="text-sm font-semibold text-slate-800">
+              ORCA is checking live marine data…
+            </p>
+            <p className="text-xs text-slate-400">
+              Orchestrator → tools → decision engine → response
+            </p>
+          </div>
+        </div>
+      )}
+
+      {error && !loading && (
+        <div className="bg-rose-50 border border-rose-200 rounded-xl p-5 shadow-sm fade-in">
+          <div className="flex items-start gap-3">
+            <i className="fa-solid fa-triangle-exclamation text-rose-500 mt-0.5"></i>
+            <div>
+              <p className="font-semibold text-sm text-rose-800">
+                ORCA could not complete the request
+              </p>
+              <p className="text-xs text-rose-600 mt-1">{error}</p>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {result && !loading && (
+        <>
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <p className="text-[10px] uppercase tracking-wider font-bold text-slate-400">
+                Latest analysis
+              </p>
+              <p className="text-sm font-semibold text-slate-800 mt-0.5">
+                {lastQuestion}
+              </p>
+            </div>
+
+            <Badge className="bg-blue-50 text-blue-700 border border-blue-100">
+              LIVE BACKEND RESULT
+            </Badge>
+          </div>
+
+          <DecisionCard result={result} />
+          <ScoreCards result={result} />
+
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
+            <EvidenceCard result={result} />
+            <GeofenceCard result={result} />
+            <SourcesCard sources={result.sources} />
+            <AdditionalInfoCard result={result} />
+          </div>
+        </>
+      )}
+
+      <div className="bg-blue-50/60 border border-blue-100 rounded-lg p-3 text-xs text-blue-900/80 flex items-center gap-2.5">
+        <i className="fa-regular fa-circle-info text-blue-500 text-sm"></i>
+        <span>
+          Advisory only. Always follow local regulations, official marine warnings,
+          and expert guidance.
+        </span>
+      </div>
+    </div>
+  );
+}
+
+
+// ============================================================================
+// ORIGINAL DASHBOARD HOME
+// Keeps the previous dashboard experience separate from the new chat screen.
+// ============================================================================
+
+const DASHBOARD_QUICK_PROMPTS = [
+  { en: "Am I near the maritime boundary?", ta: "நான் கடல் எல்லைக்கு அருகில் இருக்கிறேனா?" },
+  { en: "Is it safe to fish tomorrow?", ta: "நாளை மீன் பிடிக்க பாதுகாப்பானதா?" },
+  { en: "Check my fishing zone", ta: "எனது மீன்பிடி பகுதியை சரிபார்க்கவும்" }
+];
+
+function AskOrcaHero({ onAsk, loading, language, setLanguage, inputRef }) {
+  const [text, setText] = useState("");
+
+  const submit = (q) => {
+    const question = (q !== undefined ? q : text).trim();
+    if (!question || loading) return;
+    onAsk(question);
+    setText("");
+  };
+
+  return (
+    <div className="ocean-hero rounded-2xl p-7 md:p-9 shadow-lg fade-in">
+      <div className="flex flex-col md:flex-row md:items-end justify-between gap-4 mb-5">
+        <div>
+          <h2 className="font-display text-2xl md:text-3xl font-semibold text-white leading-tight">
+            How can ORCA help you today?
+          </h2>
+          <p className="text-slate-300/90 text-sm mt-1.5 max-w-lg">
+            Ask about your sea trip, fishing conditions or maritime boundaries.
+          </p>
+        </div>
+
+        <div className="flex bg-white/10 rounded-lg p-1 self-start md:self-auto">
+          {["en", "ta"].map((lng) => (
+            <button
+              key={lng}
+              onClick={() => setLanguage(lng)}
+              className={`px-3 py-1.5 rounded-md text-xs font-semibold transition ${
+                language === lng
+                  ? "bg-white text-slate-900"
+                  : "text-slate-200 hover:text-white"
+              }`}
+            >
+              {lng === "en" ? "English" : "தமிழ்"}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div className="flex items-center gap-2 bg-white rounded-xl p-2 shadow-inner">
+        <button
+          disabled
+          title="Voice input coming soon"
+          className="w-10 h-10 flex items-center justify-center rounded-lg text-slate-300 bg-slate-100 cursor-not-allowed flex-shrink-0"
+        >
+          <i className="fa-solid fa-microphone"></i>
+        </button>
+
+        <input
+          ref={inputRef}
+          type="text"
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") submit();
+          }}
+          placeholder={
+            language === "ta"
+              ? "உங்கள் கேள்வியை தட்டச்சு செய்யவும்…"
+              : "Ask about safety, weather, or your fishing zone…"
+          }
+          className="flex-1 min-w-0 px-2 py-2 text-sm text-slate-800 focus:outline-none bg-transparent"
+        />
+
+        <button
+          onClick={() => submit()}
+          disabled={loading || !text.trim()}
+          className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 disabled:bg-slate-300 disabled:cursor-not-allowed text-white text-sm font-semibold px-4 py-2.5 rounded-lg transition flex-shrink-0"
+        >
+          {loading
+            ? <i className="fa-solid fa-circle-notch fa-spin"></i>
+            : <i className="fa-solid fa-paper-plane"></i>}
+          <span className="hidden sm:inline">Ask ORCA</span>
+        </button>
+      </div>
+
+      <div className="flex flex-wrap gap-2 mt-4">
+        {DASHBOARD_QUICK_PROMPTS.map((p, idx) => (
+          <button
+            key={idx}
+            onClick={() => submit(p[language])}
+            disabled={loading}
+            className="text-xs font-medium text-slate-200 bg-white/10 hover:bg-white/20 border border-white/10 px-3 py-1.5 rounded-full transition disabled:opacity-50"
+          >
+            {p[language]}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+
+// ============================================================================
+// EMPTY / LOADING / ERROR STATES
+// ============================================================================
+
+function EmptyState() {
+  return (
+    <div className="bg-white border border-dashed border-slate-300 rounded-xl p-12 md:p-14 flex flex-col items-center justify-center text-center text-slate-500 space-y-3">
+      <div className="w-14 h-14 rounded-full bg-blue-50 text-blue-600 flex items-center justify-center text-2xl">
+        <i className="fa-solid fa-compass"></i>
+      </div>
+      <p className="text-sm font-semibold text-slate-700">
+        Ask ORCA about your next trip.
+      </p>
+      <p className="text-xs text-slate-400 max-w-md leading-relaxed">
+        Use the dashboard quick prompts or open Ask ORCA for a full conversation.
+        ORCA will send your question to the live backend and display the returned
+        recommendation, scores, evidence, and geofence information.
+      </p>
+    </div>
+  );
+}
+
+function LoadingState() {
+  return (
+    <div className="bg-white border border-slate-200 rounded-xl p-12 md:p-14 flex flex-col items-center justify-center text-slate-500 space-y-3 shadow-sm fade-in">
+      <i className="fa-solid fa-circle-notch fa-spin text-3xl text-blue-600"></i>
+      <p className="text-sm font-medium">ORCA is checking live marine data…</p>
+      <p className="text-xs text-slate-400">
+        Waiting for the real backend response.
+      </p>
+    </div>
+  );
+}
+
+function ErrorState({ message, onRetry }) {
+  return (
+    <div className="bg-rose-50 border border-rose-200 rounded-xl p-8 flex flex-col items-center text-center gap-3 shadow-sm fade-in">
+      <i className="fa-solid fa-triangle-exclamation text-2xl text-rose-500"></i>
+      <div>
+        <p className="font-semibold text-sm text-rose-800">
+          Unable to reach ORCA backend.
+        </p>
+        <p className="text-xs text-rose-600 mt-1 break-words max-w-xl">
+          {message || "Unknown backend error"}
+        </p>
+      </div>
+      {onRetry && (
+        <button
+          onClick={onRetry}
+          className="mt-1 flex items-center gap-2 border border-rose-300 bg-white hover:bg-rose-100 text-rose-700 text-xs font-semibold px-4 py-2 rounded-lg transition"
+        >
+          <i className="fa-solid fa-rotate-right"></i>
+          Retry
+        </button>
+      )}
+    </div>
+  );
+}
+
+function DashboardHome({
+  result,
+  question,
+  loading,
+  error,
+  language,
+  setLanguage,
+  inputRef,
+  onAsk
+}) {
+  return (
+    <div className="space-y-5 fade-in">
+      <AskOrcaHero
+        onAsk={onAsk}
+        loading={loading}
+        language={language}
+        setLanguage={setLanguage}
+        inputRef={inputRef}
+      />
+
+      {loading && <LoadingState />}
+
+      {error && !loading && (
+        <ErrorState
+          message={error}
+          onRetry={() => question && onAsk(question)}
+        />
+      )}
+
+      {!loading && !error && !result && <EmptyState />}
+
+      {!loading && !error && result && (
+        <React.Fragment>
+          <DecisionCard result={result} />
+          <ScoreCards result={result} />
+
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
+            <EvidenceCard result={result} />
+            <GeofenceCard result={result} />
+            <SourcesCard sources={result.sources} />
+            <AdditionalInfoCard result={result} />
+          </div>
+        </React.Fragment>
+      )}
+
+      <div className="bg-blue-50/60 border border-blue-100 rounded-lg p-3 text-xs text-blue-900/80 flex items-center gap-2.5">
+        <i className="fa-regular fa-circle-info text-blue-500 text-sm"></i>
+        <span>
+          Advisory only. Always follow local regulations, official marine warnings,
+          and expert guidance.
+        </span>
+      </div>
+    </div>
+  );
+}
+
+// ============================================================================
+// MAIN APP
+// ============================================================================
+
+function OrcaDashboard() {
+  const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [activeView, setActiveView] = useState("dashboard");
+  const [language, setLanguage] = useState("en");
+
+  const [health, setHealth] = useState({ status: "checking" });
+
+  const [chat, setChat] = useState([
+    {
+      id: "welcome",
+      role: "assistant",
+      content:
+        "Hello. I’m ORCA. Ask me about fishing safety, your marine zone, weather, or the maritime boundary. Every question is sent to the live ORCA backend.",
+      time: fmtClock(new Date().toISOString())
+    }
+  ]);
+
+  const [query, setQuery] = useState({
+    loading: false,
+    question: null,
+    result: null,
+    error: null
+  });
+
+  const [log, setLog] = useState([]);
+  const [alertCount, setAlertCount] = useState(0);
+  const askInputRef = useRef(null);
+  const dashboardInputRef = useRef(null);
+
+  const pushLog = useCallback((text) => {
+    setLog(prev => [
+      ...prev,
+      {
+        time: fmtClock(new Date().toISOString()),
+        text
+      }
+    ]);
+  }, []);
+
+  const checkHealth = useCallback(async () => {
+    try {
+      await apiFetch("/api/v1/health");
+      setHealth({ status: "online" });
+    } catch (_) {
+      setHealth({ status: "offline" });
+    }
+  }, []);
+
+  const loadAlertCount = useCallback(async () => {
+    try {
+      const data = await apiFetch(
+        `/api/v1/alerts/active?user_id=${encodeURIComponent(USER_ID)}`
+      );
+      setAlertCount((data.alerts || []).length);
+    } catch (_) {}
+  }, []);
+
+  useEffect(() => {
+    checkHealth();
+    loadAlertCount();
+
+    const healthTimer = setInterval(checkHealth, 15000);
+    const alertTimer = setInterval(loadAlertCount, 30000);
+
+    return () => {
+      clearInterval(healthTimer);
+      clearInterval(alertTimer);
+    };
+  }, [checkHealth, loadAlertCount]);
+
+  const clearChat = () => {
+    setChat([
+      {
+        id: `welcome-${Date.now()}`,
+        role: "assistant",
+        content:
+          "Conversation cleared. Ask ORCA a new question and I’ll send it to the live backend.",
+        time: fmtClock(new Date().toISOString())
+      }
+    ]);
+
+    setQuery({
+      loading: false,
+      question: null,
+      result: null,
+      error: null
+    });
+
+    setLog([]);
+  };
+
+  const buildBackendQuestion = (currentQuestion) => {
+    const prior = chat
+      .filter(m => m.role === "user" || m.role === "assistant")
+      .slice(-6)
+      .map(m => `${m.role === "user" ? "User" : "ORCA"}: ${m.content}`)
+      .join("\n");
+
+    if (!prior) return currentQuestion;
+
+    return [
+      "Conversation context:",
+      prior,
+      "",
+      `Current user question: ${currentQuestion}`
+    ].join("\n");
+  };
+
+  const askOrca = async (question) => {
+    if (!question.trim() || query.loading) return;
+
+    const cleanQuestion = question.trim();
+    const now = fmtClock(new Date().toISOString());
+
+    setChat(prev => [
+      ...prev,
+      {
+        id: `user-${Date.now()}`,
+        role: "user",
+        content: cleanQuestion,
+        time: now
+      }
+    ]);
+
+    setQuery({
+      loading: true,
+      question: cleanQuestion,
+      result: null,
+      error: null
+    });
+
+    setLog([]);
+
+    pushLog(`Request sent to ORCA backend: "${cleanQuestion}"`);
+    pushLog(`Location: ${LOCATION.name} (${LOCATION.latitude}, ${LOCATION.longitude})`);
+    pushLog(`Language: ${language}`);
+
+    try {
+      const backendQuestion = buildBackendQuestion(cleanQuestion);
+
+      const data = await apiFetch("/api/v1/experience/query", {
+        method: "POST",
+        body: JSON.stringify({
+          user_id: USER_ID,
+          language,
+          voice_input: false,
+          location: LOCATION,
+          question: backendQuestion
+        })
+      });
+
+      const orchestration = data.orchestration || {};
+      const tools =
+        orchestration.selected_tools ||
+        data.selected_tools ||
+        [];
+
+      pushLog(
+        `Query classified as: ${orchestration.query_type || data.query_type || "unknown"}`
+      );
+      pushLog(`Tools selected: ${tools.join(", ") || "none"}`);
+
+      (data.sources || []).forEach(source => {
+        pushLog(
+          `${titleCase(source.tool)} → ${source.source || "no source"} (${source.status}, quality=${source.quality || "n/a"})`
+        );
+      });
+
+      if (data.geospatial) {
+        pushLog(
+          `Geospatial result: ${data.geospatial.status || "unknown"}${
+            data.geospatial.distance_km !== undefined
+              ? ` · boundary distance ${fmtKm(data.geospatial.distance_km)}`
+              : ""
+          }`
+        );
+      }
+
+      pushLog(`Execution status: ${data.execution_status || "unknown"}`);
+      pushLog(
+        `Response received — recommendation: ${data.recommendation || "not returned"}`
+      );
+
+      setQuery({
+        loading: false,
+        question: cleanQuestion,
+        result: data,
+        error: null
+      });
+
+      setChat(prev => [
+        ...prev,
+        {
+          id: `assistant-${Date.now()}`,
+          role: "assistant",
+          content:
+            data.answer ||
+            "ORCA returned a result, but no answer text was provided.",
+          time: fmtClock(new Date().toISOString()),
+          result: data
+        }
+      ]);
+    } catch (e) {
+      pushLog(`Request failed: ${e.message}`);
+
+      setQuery({
+        loading: false,
+        question: cleanQuestion,
+        result: null,
+        error: e.message
+      });
+
+      setChat(prev => [
+        ...prev,
+        {
+          id: `assistant-error-${Date.now()}`,
+          role: "assistant",
+          content: `I could not complete that request. Backend error: ${e.message}`,
+          time: fmtClock(new Date().toISOString())
+        }
+      ]);
+    }
+  };
+
+  const openAsk = () => {
+    setActiveView("ask");
+    setTimeout(() => {
+      if (askInputRef.current) askInputRef.current.focus();
+    }, 80);
+  };
+
+  return (
+    <div className="min-h-screen flex bg-[#f4f7fa]">
+      <Sidebar
+        sidebarOpen={sidebarOpen}
+        setSidebarOpen={setSidebarOpen}
+        activeView={activeView}
+        setActiveView={v => {
+          if (v === "ask") openAsk();
+          else setActiveView(v);
+        }}
+        health={health}
+        alertCount={alertCount}
+      />
+
+      <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
+        <Header
+          health={health}
+          alertCount={alertCount}
+          onAlerts={() => setActiveView("alerts")}
+        />
+
+        <main className="flex-1 overflow-y-auto p-4 md:p-6 space-y-5">
+
+          {/* ================================================================
+              DASHBOARD — previous dashboard layout
+             ================================================================ */}
+          {activeView === "dashboard" && (
+            <DashboardHome
+              result={query.result}
+              question={query.question}
+              loading={query.loading}
+              error={query.error}
+              language={language}
+              setLanguage={setLanguage}
+              inputRef={dashboardInputRef}
+              onAsk={askOrca}
+            />
+          )}
+
+          {/* ================================================================
+              ASK ORCA — new full chat experience
+             ================================================================ */}
+          {activeView === "ask" && (
+            <div className="max-w-5xl mx-auto w-full fade-in">
+              <div className="mb-4">
+                <p className="text-[10px] uppercase tracking-[0.16em] font-bold text-blue-600">
+                  Conversation
+                </p>
+                <h2 className="font-display text-2xl font-bold text-slate-900 mt-1">
+                  Ask ORCA
+                </h2>
+                <p className="text-xs text-slate-500 mt-1">
+                  Continue a conversation with the live ORCA backend.
+                </p>
+              </div>
+
+              <ChatPanel
+                messages={chat}
+                language={language}
+                setLanguage={setLanguage}
+                onSend={askOrca}
+                loading={query.loading}
+                inputRef={askInputRef}
+                onClear={clearChat}
+              />
+
+              {query.result && !query.loading && (
+                <div className="mt-5">
+                  <div className="bg-white border border-slate-200 rounded-xl p-4 shadow-sm">
+                    <div className="flex items-center justify-between gap-3">
+                      <div>
+                        <p className="text-[10px] uppercase tracking-wider font-bold text-slate-400">
+                          Latest backend result
+                        </p>
+                        <p className="text-sm font-semibold text-slate-800 mt-1">
+                          {query.question}
+                        </p>
+                      </div>
+                      <Badge className="bg-blue-50 text-blue-700 border border-blue-100">
+                        LIVE RESULT
+                      </Badge>
+                    </div>
+                  </div>
+
+                  <div className="mt-4">
+                    <DecisionCard result={query.result} />
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* ================================================================
+              SAFETY ALERTS
+             ================================================================ */}
+          {activeView === "alerts" && (
+            <SafetyAlertsView
+              onRefreshCount={setAlertCount}
+            />
+          )}
+
+          {/* ================================================================
+              LIVE PIPELINE
+             ================================================================ */}
+          {activeView === "pipeline" && (
+            <div className="space-y-5 fade-in">
+              <div className="bg-white border border-slate-200 rounded-xl p-5 shadow-sm">
+                <div className="flex items-start justify-between gap-4">
+                  <div>
+                    <h2 className="font-display text-xl font-bold text-slate-900">
+                      ORCA Live Pipeline
+                    </h2>
+                    <p className="text-xs text-slate-500 mt-1">
+                      Shows the actual lifecycle of the latest conversation turn.
+                      No simulated tool calls.
+                    </p>
+                  </div>
+
+                  <Badge className="bg-emerald-50 text-emerald-700 border border-emerald-100">
+                    LIVE
+                  </Badge>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+                <StatCard title="Execution Pipeline" icon="fa-diagram-project">
+                  <PipelineDiagram
+                    result={query.result}
+                    question={query.question}
+                    loading={query.loading}
+                    error={query.error}
+                  />
+                </StatCard>
+
+                <StatCard title="Live Logs" icon="fa-terminal">
+                  <LiveLogs log={log} />
+                </StatCard>
+              </div>
+            </div>
+          )}
+        </main>
+      </div>
+    </div>
+  );
+}
+
+const root = ReactDOM.createRoot(document.getElementById("root"));
+root.render(<OrcaDashboard />);
+</script>
+</body>
+</html>

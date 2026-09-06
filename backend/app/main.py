@@ -16,6 +16,7 @@ from contextlib import asynccontextmanager
 from typing import Any
 
 from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, ConfigDict
 
 from app.api.alerts import router as alerts_router
@@ -104,6 +105,21 @@ app = FastAPI(
     title="ORCA API",
     version="0.3.1-demo",
     lifespan=lifespan,
+)
+
+# ============================================================================
+# CORS
+# ============================================================================
+# Demo frontend runs separately on localhost:5500.
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "http://localhost:5500",
+        "http://127.0.0.1:5500",
+    ],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 app.include_router(alerts_router)
