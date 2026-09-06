@@ -21,6 +21,10 @@ dependencies = [
   "pytest>=8.0.0",
   "pytest-asyncio>=0.23.0",
   "ruff>=0.5.0",
+  "groq>=1.7.0",
+  "google-generativeai>=0.8.6",
+  "shapely>=2.1.2",
+  "psycopg2-binary>=2.9.12",
 ]
 
 [tool.pytest.ini_options]
