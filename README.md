@@ -1,270 +1,258 @@
-# ORCA — Ocean Risk & Catch Advisor
+# 🌊 ORCA — Ocean Risk & Catch Advisor
 
-> **Demo Prototype | Smart India Hackathon — PS 26176**
+> **Smart India Hackathon · Problem Statement PS 26176**  
+> **Demo Prototype · Live Data · Multilingual Marine Decision Support**
 
-ORCA is a voice-first, multilingual AI platform designed to support fishermen, marine researchers, and coastal authorities with ocean-risk awareness, fishing guidance, geospatial boundary checks, and proactive safety alerts.
+ORCA is a voice-first, multilingual marine decision-support platform for **fishermen, marine researchers, and coastal authorities**.
 
-The prototype demonstrates a complete working flow using real geospatial data, Supabase/PostGIS, an ORCA orchestrator, and Groq LLM-based response synthesis.
-
----
-
-## 1. Demo Goal
-
-The prototype focuses on one concrete, human-stakes scenario:
-
-> **A fisherman near Rameswaram wants to know whether it is safe to operate near the International Maritime Boundary / EEZ boundary.**
-
-ORCA can:
-
-1. Receive a fisherman query.
-2. Understand the request and select the appropriate tool.
-3. Query real geospatial boundary data.
-4. Perform the boundary-distance calculation using PostGIS.
-5. Keep safety and fishing-yield decisions separate.
-6. Generate an explainable response.
-7. Monitor a saved frequent fishing zone in the background.
-8. Create a proactive Tamil safety alert when the zone is too close to the boundary.
+The current prototype demonstrates a working Rameswaram scenario using **live weather + marine data, PostGIS geospatial reasoning, deterministic safety decisions, proactive alerts, and a connected web dashboard**.
 
 ---
 
-## 2. What Is Working in This Prototype?
+## 🎯 1. Current Objective
 
-### Feature 1 — Proactive Geofence Alert
+| Area | Current Focus |
+|---|---|
+| Primary user | Fisherman |
+| Demo location | Rameswaram |
+| Main scenario | Fishing safety + EEZ boundary awareness |
+| Backend | FastAPI |
+| Database | Supabase PostgreSQL + PostGIS |
+| Live weather | Open-Meteo |
+| Live marine | Open-Meteo Marine API |
+| Geospatial data | Marine Regions World EEZ v12 |
+| LLM | Groq · `llama-3.3-70b-versatile` |
+| Frontend | Static HTML dashboard |
+| Alert system | Background geofence poller |
 
-A background poller periodically checks saved `frequent_zones`.
+---
 
-Current demo flow:
+# ✅ 2. What Is Working
+
+| Feature | Status | Notes |
+|---|:---:|---|
+| FastAPI backend | ✅ | Live REST API |
+| Supabase PostgreSQL | ✅ | Connected |
+| PostGIS | ✅ | Spatial queries working |
+| EEZ dataset | ✅ | Marine Regions World EEZ v12 |
+| EEZ distance check | ✅ | Real PostGIS calculation |
+| EEZ containment | ✅ | Inside / outside check |
+| ORCA orchestrator | ✅ | Intent → tool selection → execution |
+| Weather tool | ✅ | Live Open-Meteo data |
+| Marine tool | ✅ | Live Open-Meteo data |
+| Dynamic location resolution | ✅ | Place name → coordinates |
+| Safety Decision Engine | ✅ | Deterministic |
+| Fishing Yield Score | ✅ | Kept separate from safety |
+| Question-specific answers | ✅ | Wind / waves / safety / boundary |
+| Source + timestamp | ✅ | Included in structured response |
+| Quality + confidence | ✅ | Included in response |
+| Proactive geofence alerts | ✅ | Saved frequent zones |
+| Tamil alert generation | ✅ | RED alert flow |
+| Alert persistence | ✅ | Supabase |
+| Alert deduplication | ✅ | Prevents repeated alerts |
+| Background poller | ✅ | 3-hour interval |
+| Groq integration | ✅ | Synthesis / explanation |
+| Web dashboard | ✅ | Connected to live API |
+| Automated tests | ✅ | Core prototype coverage |
+
+---
+
+# 🧠 3. Live Reactive Query Flow
+
+```text
+User Question
+      ↓
+Experience API
+      ↓
+ORCA Orchestrator
+      ↓
+Intent + Context
+      ↓
+Dynamic Tool Selection
+      ↓
+┌────────────┬────────────┬─────────────┐
+│  Weather   │   Marine   │ Geospatial  │
+│ Open-Meteo │ Open-Meteo │  PostGIS    │
+└────────────┴────────────┴─────────────┘
+      ↓
+Evidence Fusion
+      ↓
+Deterministic Decision Engine
+      ↓
+┌──────────────────┬──────────────────┐
+│   Safety Score   │  Yield Score     │
+│   Weather/Risk   │  Marine Factors  │
+└──────────────────┴──────────────────┘
+      ↓
+Question-Specific Response
+      ↓
+Web Dashboard / Voice
+```
+
+### Dynamic routing
+
+| User question | Tools selected |
+|---|---|
+| “What is the wind speed tomorrow?” | Weather |
+| “What are the wave conditions?” | Marine |
+| “Is it safe to go fishing tomorrow?” | Weather + Marine + Geospatial |
+| “Am I inside the EEZ?” | Geospatial |
+| “How far is the EEZ boundary?” | Geospatial |
+
+> **Important:** Previous conversation context must not change the intent of the current question.
+
+---
+
+# ⚓ 4. Geospatial + PostGIS
+
+### Current data
+
+| Item | Value |
+|---|---|
+| Dataset | Marine Regions World EEZ v12 |
+| Database | Supabase PostgreSQL |
+| Spatial extension | PostGIS |
+| Application table | `gis.eez_boundaries` |
+| Geometry | Polygon / MultiPolygon |
+| CRS | EPSG:4326 |
+| Imported features | 285 |
+| Demo location | Rameswaram |
+| Demo coordinates | `9.2876, 79.3129` |
+
+### Example operation
+
+```text
+Rameswaram
+    ↓
+PostGIS spatial query
+    ↓
+EEZ geometry
+    ↓
+Distance / containment
+    ↓
+Structured geospatial evidence
+```
+
+The geospatial result includes **status, distance, confidence, quality, source, and timestamp**.
+
+---
+
+# 🚨 5. Proactive Geofence Alert
+
+ORCA does not require the fisherman to continuously ask questions.
 
 ```text
 Saved Frequent Zone
-       ↓
-Background Poller
-       ↓
+        ↓
+Background Alert Poller
+        ↓
 Geofence Alert Service
-       ↓
-Geospatial Tool
-       ↓
-Supabase PostgreSQL + PostGIS
-       ↓
-Marine Regions World EEZ v12
-       ↓
-Distance / Boundary Check
-       ↓
-Deterministic Safety Rule
-       ↓
-RED / AMBER Alert
-       ↓
+        ↓
+PostGIS / EEZ Check
+        ↓
+Safety Threshold
+        ↓
+Tamil RED Alert
+        ↓
 Supabase proactive_alerts
 ```
 
-The current demo zone is around Rameswaram.
+### Demo zone
 
-The prototype uses a saved frequent zone rather than continuous GPS. This keeps the demo deterministic while preserving the architecture for future GPS/AIS integration.
+| Property | Value |
+|---|---|
+| Name | Rameswaram Demo Zone |
+| Latitude | `9.2876` |
+| Longitude | `79.3129` |
+| Radius | `1.0 km` |
+| Language | Tamil |
+| Active | `true` |
+| Polling interval | 3 hours |
 
-### Feature 2 — Geospatial Boundary Query
+### Useful endpoints
 
-A user can ask:
+| Method | Endpoint | Purpose |
+|---|---|---|
+| `GET` | `/api/v1/alerts/zones` | Saved frequent zones |
+| `POST` | `/api/v1/alerts/check` | Run alert check |
+| `GET` | `/api/v1/alerts/active?user_id=demo-fisherman` | Active alerts |
+| `GET` | `/api/v1/alerts/poller/status` | Poller status |
 
-```text
-Am I near the international maritime boundary?
-```
-
-ORCA routes the request to the geospatial tool, which checks the location against the imported EEZ geometry.
-
-Example demo result:
-
-```text
-Location: Rameswaram
-Distance to EEZ boundary: ~0.49 km
-Status: Outside EEZ
-Confidence: 1.0
-Quality: GOOD
-Source: Marine Regions World EEZ v12
-```
-
-### Feature 3 — ORCA Orchestrator
-
-The experience API passes requests through the ORCA orchestration layer.
-
-The orchestrator is responsible for:
-
-- Intent classification
-- Context handling
-- Tool selection
-- Workflow execution
-- Golden Schema validation
-- LLM-based synthesis
-- Response construction
-
-For the prototype, critical geospatial/safety calculations remain deterministic. The LLM explains the evidence rather than inventing safety decisions.
-
-### Feature 4 — Groq LLM
-
-Groq is the configured LLM provider for ORCA synthesis.
-
-Current model:
-
-```text
-llama-3.3-70b-versatile
-```
-
-The existing implementation uses `GroqProvider` inside:
-
-```text
-backend/app/orchestrator/core.py
-```
-
-A separate `llm/` folder is not required for the current architecture.
-
-### Feature 5 — Golden Schema
-
-ORCA normalizes tool output into a common structure:
-
-```text
-Source
-Timestamp
-Location
-Variables
-Units
-Quality
-Confidence
-```
-
-This makes outputs from different data sources easier to validate, fuse, and explain.
+`delivery_status = created` means the alert was **generated and persisted**. External SMS/push delivery is not connected yet.
 
 ---
 
-# 3. Architecture
+# 🛡️ 6. Safety vs Fishing Yield
+
+ORCA deliberately keeps these decisions separate.
+
+| Safety | Fishing Yield |
+|---|---|
+| Wind risk | SST |
+| Wave conditions | Chlorophyll |
+| Weather warnings | PFZ likelihood |
+| Boundary proximity | Historical indicators |
+| Safety constraints | Marine productivity |
+
+### Design rule
+
+> **A productive fishing location must never make an unsafe trip appear safe.**
+
+---
+
+# 🤖 7. Intelligence Architecture
+
+| Layer | Responsibility |
+|---|---|
+| **Orchestrator** | Intent, context, tool selection, workflow |
+| **Data Tools** | Weather, marine, geospatial evidence |
+| **Fusion** | Normalize and combine evidence |
+| **Decision Engine** | Deterministic safety + yield assessment |
+| **Groq LLM** | Natural-language synthesis / explanation |
+| **Response Layer** | Structured + user-facing response |
+| **Alert System** | Background hazard detection |
+
+### Core principle
 
 ```text
-                    ┌──────────────────────────┐
-                    │        ORCA Users        │
-                    │                          │
-                    │ Fisherman | Researcher   │
-                    │ Authority                │
-                    └────────────┬─────────────┘
-                                 │
-                                 ▼
-                    ┌──────────────────────────┐
-                    │     Experience API       │
-                    │      FastAPI / REST      │
-                    └────────────┬─────────────┘
-                                 │
-                                 ▼
-                    ┌──────────────────────────┐
-                    │   ORCA Orchestrator      │
-                    │                          │
-                    │ Intent → Context →      │
-                    │ Tool Selection → Flow    │
-                    └────────────┬─────────────┘
-                                 │
-              ┌──────────────────┼──────────────────┐
-              │                  │                  │
-              ▼                  ▼                  ▼
-       ┌────────────┐     ┌────────────┐     ┌────────────┐
-       │ Geospatial │     │ Marine Data│     │  Weather   │
-       │   Tool     │     │    Tool    │     │    Tool    │
-       └─────┬──────┘     └────────────┘     └────────────┘
-             │
-             ▼
-       ┌────────────────────────────┐
-       │     Supabase PostgreSQL    │
-       │          + PostGIS         │
-       └────────────┬───────────────┘
-                    │
-                    ▼
-       ┌────────────────────────────┐
-       │ Marine Regions World EEZ   │
-       │          v12               │
-       └────────────────────────────┘
-
-                    Query Response
-                         │
-                         ▼
-              ┌─────────────────────┐
-              │   Groq LLM          │
-              │   Synthesis /       │
-              │   Explanation       │
-              └──────────┬──────────┘
-                         │
-                         ▼
-              Text / Voice / Map / Alert
-
-
-       ───────── PROACTIVE PATH ─────────
-
-       Saved Frequent Zones
-                │
-                ▼
-       Background Alert Poller
-                │
-                ▼
-       Geofence Alert Service
-                │
-                ▼
-       Geospatial Tool + PostGIS
-                │
-                ▼
-       Safety Threshold
-                │
-                ▼
-       Tamil Proactive Alert
-                │
-                ▼
-       proactive_alerts
+Real Data
+   ↓
+Deterministic Calculation
+   ↓
+Safety Decision
+   ↓
+LLM Explanation
 ```
 
----
-
-# 4. Technology Stack
-
-## Backend
-
-- Python 3.12+
-- FastAPI
-- Uvicorn
-- Pydantic
-- SQLAlchemy
-- asyncpg
-- httpx
-- LangGraph
-- pytest
-
-## Database
-
-- Supabase
-- PostgreSQL
-- PostGIS
-
-## AI / LLM
-
-- Groq API
-- `llama-3.3-70b-versatile`
-
-## Geospatial
-
-- PostGIS
-- Marine Regions World EEZ v12
-- GeoPackage (`.gpkg`)
-
-## Frontend
-
-The architecture supports:
-
-- Next.js
-- TypeScript
-- MapLibre GL JS
-- deck.gl
-
-The current demo primarily validates the backend/API and core prototype workflow.
+The LLM does **not** override deterministic geospatial safety calculations.
 
 ---
 
-# 5. Project Structure
+# 🏗️ 8. Technology Stack
+
+| Layer | Technology |
+|---|---|
+| Language | Python 3.12+ |
+| API | FastAPI + Uvicorn |
+| Validation | Pydantic |
+| Database | PostgreSQL |
+| Managed DB | Supabase |
+| Spatial | PostGIS |
+| HTTP | httpx |
+| Orchestration | LangGraph + ORCA workflow |
+| LLM | Groq |
+| Weather | Open-Meteo |
+| Marine | Open-Meteo Marine API |
+| Geospatial | Marine Regions World EEZ v12 |
+| Testing | pytest |
+| Frontend | HTML + React UMD + Tailwind CDN |
+
+---
+
+# 📁 9. Project Structure
 
 ```text
 orca/
-│
 ├── backend/
 │   ├── app/
 │   │   ├── agents/
@@ -278,88 +266,47 @@ orca/
 │   │   ├── tools/
 │   │   ├── voice/
 │   │   ├── orchestrator/
-│   │   ├── __init__.py
 │   │   └── main.py
-│   │
 │   └── tests/
-│
 ├── data/
-│   └── geospatial/
-│
 ├── docs/
-│
 ├── frontend/
-│
 ├── scripts/
-│
 ├── .env
 ├── .env.example
-├── .gitignore
 ├── pyproject.toml
 └── README.md
 ```
 
 ---
 
-# 6. Prerequisites
+# ⚙️ 10. Environment
 
-Install:
-
-- Python 3.12+
-- `uv`
-- Git
-- A Supabase project
-- A Groq API key
-
-The project uses a Python virtual environment located at:
-
-```text
-.venv/
-```
-
----
-
-# 7. Environment Configuration
-
-Create a local `.env` file in the repository root.
-
-Use `.env.example` as the template.
-
-Required configuration:
+Create `.env` in the repository root:
 
 ```env
-# Supabase
 SUPABASE_URL=
 SUPABASE_ANON_KEY=
 SUPABASE_SERVICE_ROLE_KEY=
-
-# PostgreSQL
 DATABASE_URL=
 
-# LLM
 GROQ_API_KEY=
 GROQ_MODEL=llama-3.3-70b-versatile
+
+WEATHER_PROVIDER=open_meteo
+MARINE_PROVIDER=open_meteo
+
+OPEN_METEO_WEATHER_URL=https://api.open-meteo.com/v1/forecast
+OPEN_METEO_MARINE_URL=https://marine-api.open-meteo.com/v1/marine
 ```
 
-## Important
-
-Never commit `.env`.
-
-The repository intentionally tracks:
-
-```text
-.env.example
-```
-
-but ignores:
-
-```text
-.env
-```
+> 🔒 **Never commit `.env`.** Use `.env.example` for shared configuration.
 
 ---
 
-# 8. Install Dependencies
+# ▶️ 11. Start ORCA
+
+## Step 1 — Install dependencies
 
 From the repository root:
 
@@ -367,503 +314,104 @@ From the repository root:
 uv sync
 ```
 
-Activate the environment on Windows PowerShell:
+Optional Windows PowerShell activation:
 
 ```powershell
 .\.venv\Scripts\Activate.ps1
 ```
 
-Then:
+---
+
+## Step 2 — Start Backend
+
+### Terminal 1
 
 ```powershell
-cd backend
+cd C:\Users\DEVANSH\Desktop\orca\backend
+
+$env:PYTHONPATH="."
+$env:WEATHER_PROVIDER="open_meteo"
+$env:MARINE_PROVIDER="open_meteo"
+
+uv run uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
 ```
+
+### Backend URLs
+
+| Service | URL |
+|---|---|
+| API | `http://127.0.0.1:8000` |
+| Swagger | `http://127.0.0.1:8000/docs` |
+| Health | `http://127.0.0.1:8000/api/v1/health` |
 
 ---
 
-# 9. Supabase + PostGIS
+## Step 3 — Start Frontend
 
-ORCA requires PostgreSQL with PostGIS enabled.
-
-The prototype uses:
-
-```text
-Supabase PostgreSQL
-        +
-PostGIS
-```
-
-The geospatial database contains:
-
-```text
-gis.eez_boundaries
-```
-
-The prototype also uses:
-
-```text
-public.frequent_zones
-public.proactive_alerts
-```
-
-These tables support the proactive geofence demonstration.
-
-Before running the application, ensure the required database tables and EEZ geometry have been imported.
-
----
-
-# 10. EEZ Data
-
-The prototype uses:
-
-```text
-Marine Regions World EEZ v12
-```
-
-The relevant source layer is:
-
-```text
-eez_v12
-```
-
-It contains polygon/multipolygon EEZ geometries in EPSG:4326.
-
-The application imports these geometries into:
-
-```text
-gis.eez_boundaries
-```
-
-The imported dataset contains:
-
-```text
-285
-```
-
-EEZ features.
-
-Large geospatial files are intentionally ignored by Git.
-
----
-
-# 11. Start the Backend
-
-From:
-
-```text
-orca/backend
-```
-
-run:
+### Terminal 2
 
 ```powershell
-uv run uvicorn app.main:app --reload
+cd C:\Users\DEVANSH\Desktop\orca\frontend
+
+python -m http.server 5500
 ```
-
-The API should start at:
-
-```text
-http://127.0.0.1:8000
-```
-
-Swagger documentation:
-
-```text
-http://127.0.0.1:8000/docs
-```
-
----
-
-# 12. Health Check
 
 Open:
 
 ```text
-GET /api/v1/health
+http://127.0.0.1:5500/orca_dashboard.html
 ```
 
-Expected response should indicate that the API is running.
+The dashboard connects to the FastAPI backend on port `8000`.
 
 ---
 
-# 13. Demo — Geospatial Boundary Query
+# 🧪 12. Quick Demo
 
-Open Swagger:
+After starting both servers:
 
-```text
-http://127.0.0.1:8000/docs
-```
-
-Find:
+### 1. Weather
 
 ```text
-POST /api/v1/experience/query
+What is the wind speed tomorrow near Rameswaram?
 ```
 
-Use:
-
-```json
-{
-  "user_id": "demo-fisherman",
-  "language": "en",
-  "voice_input": false,
-  "location": {
-    "name": "Rameswaram",
-    "latitude": 9.2876,
-    "longitude": 79.3129
-  },
-  "question": "Am I near the international maritime boundary?"
-}
-```
-
-The response should contain:
-
-- Orchestration information
-- Selected geospatial tool
-- EEZ result
-- Distance
-- Confidence
-- Quality
-- Source
-- Timestamp
-- Recommendation
-
-Example:
+### 2. Marine
 
 ```text
-query_type: boundary_geofence_query
-selected_tools: geospatial
+What are the wave conditions tomorrow near Rameswaram?
+```
 
-inside: false
-distance_km: ~0.49
-confidence: 1.0
-quality: GOOD
-source: Marine Regions World EEZ v12
+### 3. Safety
 
-recommendation: OUTSIDE_EEZ
+```text
+Is it safe to go fishing tomorrow near Rameswaram?
+```
+
+### 4. Boundary
+
+```text
+Am I inside the EEZ near Rameswaram?
+```
+
+### 5. Tamil
+
+```text
+நாளைக்கு ராமேஸ்வரத்தில் மீன்பிடிக்க போகலாமா?
 ```
 
 ---
 
-# 14. Demo — Proactive Alert
-
-The proactive alert system monitors saved frequent zones.
-
-Check configured zones:
-
-```text
-GET /api/v1/alerts/zones
-```
-
-The demo zone is:
-
-```text
-Name: Rameswaram Demo Zone
-Latitude: 9.2876
-Longitude: 79.3129
-Radius: 1.0 km
-Language: Tamil
-Active: true
-```
-
-Trigger a check manually:
-
-```text
-POST /api/v1/alerts/check
-```
-
-Request:
-
-```json
-{
-  "user_id": "demo-fisherman",
-  "force": true
-}
-```
-
-The system performs:
-
-```text
-Frequent Zone
-    ↓
-Geofence Service
-    ↓
-GeospatialTool
-    ↓
-PostGIS
-    ↓
-EEZ Boundary
-    ↓
-Distance ≈ 0.49 km
-    ↓
-RED Alert
-```
-
-Example alert:
-
-```text
-Title:
-கடல் எல்லைக்கு மிக அருகில்
-
-Message:
-சிவப்பு எச்சரிக்கை: நீங்கள் EEZ எல்லையிலிருந்து
-சுமார் 0.49 km தொலைவில் உள்ளீர்கள்.
-```
-
----
-
-# 15. Check Active Alerts
-
-Use:
-
-```text
-GET /api/v1/alerts/active?user_id=demo-fisherman
-```
-
-This returns alerts stored in:
-
-```text
-public.proactive_alerts
-```
-
-The current prototype's:
-
-```text
-delivery_status = created
-```
-
-means the alert has been generated and persisted by ORCA.
-
-It does **not** mean that an external SMS/push notification has already been delivered.
-
----
-
-# 16. Check the Background Poller
-
-Use:
-
-```text
-GET /api/v1/alerts/poller/status
-```
-
-A healthy running poller should show:
-
-```json
-{
-  "running": true,
-  "interval_seconds": 10800,
-  "last_run_at": "...",
-  "last_result": {
-    "status": "completed"
-  },
-  "last_error": null
-}
-```
-
-The current prototype runs the alert check:
-
-```text
-Every 3 hours
-```
-
-and performs an initial check when the application starts.
-
----
-
-# 17. Alert Deduplication
-
-The proactive alert service prevents repeated alerts for the same condition within the configured deduplication window.
-
-This avoids creating the same alert every time the poller runs.
-
-A subsequent check can return:
-
-```text
-status: deduplicated
-alerts_created: 0
-```
-
-when an equivalent active alert already exists.
-
----
-
-# 18. Groq LLM Verification
-
-Before testing ORCA's full LLM path, verify that the Groq SDK is installed:
-
-```powershell
-uv run python -c "from groq import Groq; print('GROQ SDK OK')"
-```
-
-Verify configuration without exposing the API key:
-
-```powershell
-uv run python -c "import os; from dotenv import load_dotenv; load_dotenv('../.env'); print('GROQ KEY:', 'SET' if os.getenv('GROQ_API_KEY') else 'MISSING'); print('GROQ MODEL:', os.getenv('GROQ_MODEL','MISSING'))"
-```
-
-Expected:
-
-```text
-GROQ KEY: SET
-GROQ MODEL: llama-3.3-70b-versatile
-```
-
-The actual ORCA provider is implemented as:
-
-```text
-backend/app/orchestrator/core.py
-```
-
-with:
-
-```text
-GroqProvider
-```
-
----
-
-# 19. Safety vs Fishing Yield
-
-ORCA deliberately keeps these two scores separate.
-
-## Safety Score
-
-Based on factors such as:
-
-- Weather risk
-- Waves
-- Warnings
-- Geospatial boundary risk
-- Safety constraints
-
-## Fishing Yield Score
-
-Based on factors such as:
-
-- PFZ likelihood
-- SST
-- Chlorophyll
-- Historical trends
-
-They are **never blended into one score**.
-
-This prevents a potentially productive fishing location from being presented as safe when it is not.
-
----
-
-# 20. Deterministic Safety + LLM Explanation
-
-The prototype follows an important design principle:
-
-```text
-Real Data
-   ↓
-Deterministic Calculation
-   ↓
-Safety Decision
-   ↓
-LLM Explanation
-```
-
-The LLM should explain evidence and communicate the result naturally.
-
-It should not override deterministic geospatial safety calculations.
-
-This is particularly important for safety-critical scenarios.
-
----
-
-# 21. Demo Flow for Presentation
-
-Recommended SIH demo sequence:
-
-### Step 1 — Show the fisherman scenario
-
-Say:
-
-> "A fisherman near Rameswaram wants to know whether he is close to the maritime boundary."
-
-### Step 2 — Ask the API
-
-Use:
-
-```text
-Am I near the international maritime boundary?
-```
-
-### Step 3 — Show real geospatial evidence
-
-Point out:
-
-```text
-Distance ≈ 0.49 km
-Source = Marine Regions World EEZ v12
-Confidence = 1.0
-```
-
-### Step 4 — Show the proactive system
-
-Explain:
-
-> "The fisherman doesn't have to continuously ask ORCA. ORCA can monitor a saved frequent fishing zone in the background."
-
-### Step 5 — Show the poller
-
-Open:
-
-```text
-GET /api/v1/alerts/poller/status
-```
-
-Show:
-
-```text
-running: true
-interval: 10800 seconds
-last_run_at: ...
-last_error: null
-```
-
-### Step 6 — Show the alert
-
-Open:
-
-```text
-GET /api/v1/alerts/active
-```
-
-Show the Tamil RED alert.
-
-### Step 7 — Explain the architecture
-
-Emphasize:
-
-```text
-Orchestrator
-+
-Real Data Tools
-+
-PostGIS
-+
-Deterministic Safety
-+
-Groq LLM
-+
-Proactive Alerts
-```
-
----
-
-# 22. API Endpoints
+# 🔌 13. API Endpoints
 
 | Method | Endpoint | Purpose |
 |---|---|---|
-| GET | `/api/v1/health` | API health |
-| POST | `/api/v1/experience/query` | Main ORCA experience query |
-| POST | `/api/v1/alerts/check` | Run geofence alert check |
-| GET | `/api/v1/alerts/active` | Retrieve active alerts |
-| GET | `/api/v1/alerts/zones` | Retrieve frequent zones |
-| GET | `/api/v1/alerts/poller/status` | Background poller status |
+| `GET` | `/api/v1/health` | API health |
+| `POST` | `/api/v1/experience/query` | Main ORCA query |
+| `POST` | `/api/v1/alerts/check` | Trigger geofence check |
+| `GET` | `/api/v1/alerts/active` | Active alerts |
+| `GET` | `/api/v1/alerts/zones` | Frequent zones |
+| `GET` | `/api/v1/alerts/poller/status` | Poller status |
 
 Swagger:
 
@@ -873,160 +421,122 @@ http://127.0.0.1:8000/docs
 
 ---
 
-# 23. Testing
+# 🧪 14. Testing
 
-Run the backend tests:
+From repository root:
 
 ```powershell
 uv run pytest backend/tests -v
 ```
 
-The test suite covers the prototype's core geofence and API behavior.
+Live Open-Meteo provider tests:
+
+```powershell
+uv run pytest backend/tests/test_open_meteo_provider.py -v -s
+```
+
+Live decision integration:
+
+```powershell
+cd backend
+$env:PYTHONPATH="."
+uv run python tests/test_live_decision_integration.py
+```
 
 ---
 
-# 24. Current Prototype Boundaries
+# ⚠️ 15. Current Limitations
 
-This is a **demo prototype**, not a production maritime safety system.
+| Area | Current State |
+|---|---|
+| IMBL authoritative geometry | Not yet configured; EEZ data used for current demo |
+| SMS / Push | Not connected |
+| Tamil STT/TTS | Not primary validated path yet |
+| Authority dashboard | Lighter implementation |
+| Researcher dashboard | Lighter implementation |
+| RAG / learning | Future phase |
+| GPS / AIS | Future phase |
+| IMD / INCOIS / Copernicus | Future integrations |
+| Production infrastructure | Not yet required |
 
-Current limitations include:
-
-- Frequent zones are stored explicitly rather than continuously receiving GPS.
-- External SMS/push delivery is not yet connected.
-- Voice STT/TTS integration is not the primary validated demo path yet.
-- Authority and researcher experiences are lighter than the fisherman journey.
-- The proactive poller uses a simple application-level background loop.
-- Advanced learning/RAG is planned for a later phase.
-- Production infrastructure such as Kubernetes, Kafka, Redis, and Celery is intentionally not required for this prototype.
-
----
-
-# 25. Roadmap
-
-Future phases can add:
-
-### Voice
-
-- Tamil STT
-- Tamil TTS
-- Hindi
-- Telugu
-- Malayalam
-
-### Data
-
-- INCOIS PFZ
-- Copernicus SST
-- Chlorophyll
-- IMD weather
-- Tide and wave information
-
-### Intelligence
-
-- RAG with pgvector
-- Feedback learning
-- Strategy optimization
-- Historical fishing patterns
-- Domain-specific agents
-
-### Location
-
-- Live GPS
-- AIS
-- Dynamic geofencing
-- Expanded IMBL/EEZ/MPA boundaries
-
-### Alerts
-
-- Push notifications
-- SMS
-- IVRS
-- Mobile application
-
-### Interfaces
-
-- Fisherman mobile/voice interface
-- Authority district dashboard
-- Researcher analysis dashboard
+> This is a **demo decision-support prototype**, not a production maritime safety authority.
 
 ---
 
-# 26. Core Design Principles
+# 🚀 16. Next Priorities
 
-ORCA follows these principles:
+| Priority | Work |
+|:---:|---|
+| **1** | Validate all reactive + boundary question types |
+| **2** | Reduce response latency |
+| **3** | Complete Tamil STT → ORCA → TTS |
+| **4** | Add IMD / INCOIS / Copernicus sources |
+| **5** | Complete authority dashboard |
+| **6** | Complete researcher analysis |
+| **7** | Add SMS / Push / IVRS |
+| **8** | Add RAG + feedback learning |
+| **9** | Add GPS / AIS + expanded geofencing |
+
+### Performance direction
+
+```text
+Current
+Weather ─┐
+Marine ──┼→ Decision → Response
+Geo ─────┘
+
+Next
+Weather ─┐
+Marine ──┼→ Parallel Execution → Fast Decision
+Geo ─────┘                         ↓
+                            Optional LLM
+```
+
+Focus: **parallel tool execution, connection reuse, short-lived caching, and selective LLM usage** without adding unnecessary infrastructure.
+
+---
+
+# 🏆 17. Demo Readiness
+
+| Capability | Status |
+|---|:---:|
+| Live backend | 🟢 |
+| Live weather | 🟢 |
+| Live marine | 🟢 |
+| PostGIS geospatial reasoning | 🟢 |
+| Dynamic tool routing | 🟢 |
+| Separate safety / yield scores | 🟢 |
+| Question-specific answers | 🟢 |
+| Proactive alert flow | 🟢 |
+| Web dashboard | 🟢 |
+| Tamil proactive alerts | 🟢 |
+| Full voice journey | 🟡 |
+| External notifications | 🟡 |
+| Authority / researcher experiences | 🟡 |
+| RAG / learning | 🔵 |
+| GPS / AIS | 🔵 |
+
+**Legend:** 🟢 Working · 🟡 In progress · 🔵 Future
+
+---
+
+# 💡 Core Design Principles
 
 1. **Real data over fake demo data**
 2. **Deterministic safety decisions**
 3. **LLM for synthesis and explanation**
 4. **Safety and fishing yield remain separate**
-5. **Tool-driven orchestration**
+5. **Dynamic tool-driven orchestration**
 6. **Source and timestamp visibility**
 7. **Multilingual by design**
-8. **Proactive alerts without requiring a user query**
+8. **Proactive alerts without requiring a query**
 9. **Simple MVP infrastructure**
-10. **Production-ready architecture without unnecessary production complexity**
+10. **Production-ready architecture without unnecessary complexity**
 
 ---
 
-# 27. Demo Status
-
-### Current working prototype
-
-```text
-✅ FastAPI backend
-✅ Supabase PostgreSQL
-✅ PostGIS
-✅ Marine Regions EEZ data
-✅ EEZ geospatial query
-✅ Real PostGIS distance calculation
-✅ Frequent fishing zones
-✅ Proactive geofence service
-✅ Background alert poller
-✅ Tamil proactive alert generation
-✅ Alert persistence
-✅ Alert deduplication
-✅ ORCA orchestrator
-✅ Groq provider integration
-✅ Golden Schema
-✅ Automated tests
-```
-
-### In progress / future
-
-```text
-🔄 Full Tamil voice journey
-🔄 External SMS / push delivery
-🔄 Complete researcher dashboard
-🔄 Complete authority dashboard
-🔄 Additional marine/weather live sources
-🔄 RAG + learning loop
-🔄 GPS/AIS integration
-```
-
----
-
-# 28. License / Data Attribution
-
-The Marine Regions World EEZ dataset is distributed under its applicable data license.
-
-Keep the original EEZ dataset license file with the project:
-
-```text
-LICENSE_EEZ_v12.txt
-```
-
-Check the dataset's license terms before redistributing the source geospatial data.
-
----
-
-## ORCA
+## 🌊 ORCA
 
 **Ocean Risk & Catch Advisor**
 
-A demo prototype for safer, smarter, multilingual decision support for India's marine ecosystem.
-
-# 29. Final Architecture
-
-The following is the final ORCA architecture for the demo prototype...
-
-![ORCA Final Architecture](docs/architecture-final.png)
+> **Safer seas. Smarter decisions. Multilingual access.**
